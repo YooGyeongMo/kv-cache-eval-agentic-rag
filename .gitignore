@@ -1,0 +1,10 @@
+.venv/
+.venv.nosync/
+__pycache__/
+*.pyc
+.env
+index/
+data/papers/*.pdf
+outputs/*.html
+outputs/*.pdf
+.DS_Store

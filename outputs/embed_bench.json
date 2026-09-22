@@ -1,0 +1,86 @@
+[
+  {
+    "model": "bge-m3",
+    "hf_id": "BAAI/bge-m3",
+    "params_m": 568,
+    "index_seconds": 24.6,
+    "chunks": 211,
+    "ko": {
+      "n": 20,
+      "dense_hit@5": 0.85,
+      "dense_mrr": 0.767,
+      "hybrid_hit@5": 0.55,
+      "hybrid_mrr": 0.492
+    },
+    "en": {
+      "n": 20,
+      "dense_hit@5": 0.95,
+      "dense_mrr": 0.867,
+      "hybrid_hit@5": 0.95,
+      "hybrid_mrr": 0.93
+    }
+  },
+  {
+    "model": "me5-large",
+    "hf_id": "intfloat/multilingual-e5-large",
+    "params_m": 560,
+    "index_seconds": 24.2,
+    "chunks": 211,
+    "ko": {
+      "n": 20,
+      "dense_hit@5": 0.75,
+      "dense_mrr": 0.677,
+      "hybrid_hit@5": 0.5,
+      "hybrid_mrr": 0.452
+    },
+    "en": {
+      "n": 20,
+      "dense_hit@5": 0.95,
+      "dense_mrr": 0.919,
+      "hybrid_hit@5": 0.95,
+      "hybrid_mrr": 0.88
+    }
+  },
+  {
+    "model": "kure-v1",
+    "hf_id": "nlpai-lab/KURE-v1",
+    "params_m": 568,
+    "index_seconds": 24.3,
+    "chunks": 211,
+    "ko": {
+      "n": 20,
+      "dense_hit@5": 0.8,
+      "dense_mrr": 0.692,
+      "hybrid_hit@5": 0.55,
+      "hybrid_mrr": 0.479
+    },
+    "en": {
+      "n": 20,
+      "dense_hit@5": 0.95,
+      "dense_mrr": 0.906,
+      "hybrid_hit@5": 0.95,
+      "hybrid_mrr": 0.897
+    }
+  },
+  {
+    "model": "mini-multi",
+    "hf_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "params_m": 118,
+    "index_seconds": 6.9,
+    "chunks": 211,
+    "ko": {
+      "n": 20,
+      "dense_hit@5": 0.65,
+      "dense_mrr": 0.48,
+      "hybrid_hit@5": 0.5,
+      "hybrid_mrr": 0.356
+    },
+    "en": {
+      "n": 20,
+      "dense_hit@5": 0.75,
+      "dense_mrr": 0.675,
+      "hybrid_hit@5": 0.85,
+      "hybrid_mrr": 0.807
+    }
+  }
+]

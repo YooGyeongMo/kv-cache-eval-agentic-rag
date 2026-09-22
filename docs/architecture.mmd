@@ -1,0 +1,36 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	prepare(prepare)
+	survey(survey)
+	collect_join(collect_join)
+	market(market)
+	domain(domain)
+	audit(audit)
+	recollect(recollect)
+	synthesize(synthesize)
+	report(report)
+	verify(verify)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> prepare;
+	audit -.-> recollect;
+	audit -. &nbsp;ok&nbsp; .-> synthesize;
+	collect_join -.-> domain;
+	collect_join -.-> market;
+	domain --> audit;
+	market --> audit;
+	prepare -.-> survey;
+	recollect -.-> domain;
+	recollect -.-> market;
+	report --> verify;
+	survey --> collect_join;
+	synthesize --> report;
+	verify -. &nbsp;done&nbsp; .-> __end__;
+	verify -. &nbsp;rewrite&nbsp; .-> report;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

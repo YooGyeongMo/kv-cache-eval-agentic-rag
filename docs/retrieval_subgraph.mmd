@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	localize(localize)
+	retrieve(retrieve)
+	grade(grade)
+	widen(widen)
+	rewrite(rewrite)
+	web(web)
+	__end__([<p>__end__</p>]):::last
+	__start__ -. &nbsp;pool&nbsp; .-> localize;
+	__start__ -.-> web;
+	grade -. &nbsp;done&nbsp; .-> __end__;
+	grade -.-> rewrite;
+	grade -.-> web;
+	grade -.-> widen;
+	localize --> retrieve;
+	retrieve --> grade;
+	rewrite --> retrieve;
+	widen --> retrieve;
+	web --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

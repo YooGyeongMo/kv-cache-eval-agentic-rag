@@ -1,0 +1,31 @@
+{
+  "note": "문서 풀. 과제가 총 200쪽으로 제한한다. 논문 2편이 65쪽이고 나머지는 시장 근거 문서로 채운다.",
+  "documents": [
+    {
+      "doc_id": "MLA",
+      "path": "papers/2405.04434.pdf",
+      "camp": "sw",
+      "doc_type": "paper",
+      "title": "DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model",
+      "authors": "DeepSeek-AI",
+      "year": "2024",
+      "venue": "arXiv",
+      "arxiv": "2405.04434",
+      "url": "https://arxiv.org/abs/2405.04434",
+      "pages": 52
+    },
+    {
+      "doc_id": "ITME",
+      "path": "papers/2606.12556.pdf",
+      "camp": "hw",
+      "doc_type": "paper",
+      "title": "ITME: Inference Tiered Memory Expansion with Disaggregated CXL-Hybrid Memories",
+      "authors": "Jang, H., Min, Y., Kim, S., Ahn, T., Kim, H., Joo, Y., Kim, H., & Kim, J.",
+      "year": "2026",
+      "venue": "arXiv",
+      "arxiv": "2606.12556",
+      "url": "https://arxiv.org/abs/2606.12556",
+      "pages": 13
+    }
+  ]
+}
