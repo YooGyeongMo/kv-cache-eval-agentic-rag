@@ -1,0 +1,62 @@
+name: CI
+
+# API 키 없이 돌 수 있는 것만 검사한다. 보고서 생성은 OpenAI와 Tavily가
+# 필요하므로 CI에서 돌리지 않는다. 대신 그 결과를 검사하는 검증기와
+# 그래프 구조를 검사해, 설계와 구현이 어긋나면 여기서 걸리게 한다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: 의존성 설치
+        run: uv sync --python 3.11 --dev
+
+      - name: 검증기와 그래프 구조 테스트
+        run: uv run pytest tests/ -v
+
+      - name: 문서 풀 쪽수 제한 확인
+        run: |
+          uv run python - <<'PY'
+          import json, pathlib
+          spec = json.loads(pathlib.Path("data/pool.json").read_text(encoding="utf-8"))
+          total = sum(d.get("pages", 0) for d in spec["documents"])
+          print(f"문서 풀 {total}쪽")
+          assert total <= 200, f"과제 제한 200쪽을 넘는다: {total}쪽"
+          PY
+
+      - name: 참고문헌 서지 대조 (arXiv 원본)
+        run: uv run python tools/qa.py --no-net || true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@v5
+
+      - name: 구문 검사
+        run: |
+          uv run python -m compileall -q agents rag tools eval *.py
+          echo "구문 검사 통과"
+
+      - name: 비밀키 유출 검사
+        run: |
+          if git grep -nIE 'sk-proj-[A-Za-z0-9_-]{20}|sk-ant-|tvly-[A-Za-z0-9]{10}' -- . ; then
+            echo "::error::비밀키로 보이는 문자열이 저장소에 있다"
+            exit 1
+          fi
+          echo "비밀키 유출 없음"

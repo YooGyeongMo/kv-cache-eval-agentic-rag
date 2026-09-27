@@ -139,9 +139,13 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 │   ├── loader_probe.py    # 로더 비교 실측
 │   ├── embed_bench.py     # 임베딩 후보 비교 실측
 │   └── queries.json       # 정답 문자열이 붙은 검색 질의 20건
+├── tests/
+│   ├── test_verify.py     # 검증기 회귀 테스트 (레드팀 사례 고정)
+│   └── test_graph.py      # 그래프 구조와 설계 규약 테스트
 ├── tools/
 │   ├── draw_graph.py      # 그래프 다이어그램 출력
-│   └── md2pdf.py          # 보고서 PDF 변환과 쪽수 검사
+│   ├── md2pdf.py          # 보고서 PDF 변환과 쪽수 검사
+│   └── qa.py              # 제출 전 최종 점검 12항목
 ├── outputs/               # 보고서와 실행 State
 ├── config.py              # 평가 대상, 관점별 기준, 편향 방지 장치
 ├── state.py               # State 스키마
@@ -169,6 +173,7 @@ python eval/loader_probe.py   # PDF 로더 비교 실측 재현
 python eval/embed_bench.py    # 임베딩 후보 비교 실측 재현
 python tools/md2pdf.py outputs/report_seed0.md   # PDF 변환과 쪽수 검사
 python tools/qa.py            # 제출 전 최종 점검
+pytest tests/                 # 검증기와 그래프 구조 테스트 (API 키 불필요)
 ```
 
 `app.py final`은 색인, 정방향 실행, 역방향 실행, 순서 효과 비교, PDF 변환,
