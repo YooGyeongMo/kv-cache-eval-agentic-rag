@@ -129,6 +129,37 @@ def site_name(url: str) -> str:
     return base.replace("-", " ").title()
 
 
+UNIT_WORDS = {
+    "배": r"(?:times|fold|×|x\b|speedup)",
+    "×": r"(?:times|fold|×|x\b|speedup)",
+    "%": r"(?:%|percent)",
+}
+
+
+def backed_by(token: str, backing: str) -> bool:
+    """근거가 그 표기를 실제로 받치는지 본다.
+
+    숫자만 대조하면 우연히 맞는다. 3차 보고서가 "KV cache를 64배 이상 줄여"에
+    [MLA p.6]을 달았는데, 그 쪽에는 64가 차원 값으로만 있었고 배수 이야기는
+    없었다. 그래도 통과했다. 그래서 단위가 붙은 수치는 근거에서도 그 단위와
+    가까이 있어야 받친 것으로 본다.
+    """
+    flat = backing.replace(" ", "")
+    probe = re.sub(r"\s+", "", token).lower()
+    unit = next((u for u in UNIT_WORDS if probe.endswith(u)), None)
+    num = probe.rstrip("%배×") if unit else probe
+
+    if len(num) < 3 and not unit:
+        return True                      # 두 자리 이하 맨숫자는 판단하지 않는다
+    if num not in flat:
+        return False
+    if not unit:
+        return True
+    # 단위가 붙었으면 근거에서도 그 수 가까이에 같은 뜻의 단위가 있어야 한다
+    pat = re.escape(num) + r"\s*(?:[^\s]{0,12}\s*)?" + UNIT_WORDS[unit]
+    return re.search(pat, backing, re.I) is not None
+
+
 def source_tier(url: str) -> str:
     """일차 자료, 시장조사 요약, 기타 이차 자료로 가른다."""
     host = re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0].lower()
@@ -348,6 +379,30 @@ def _dump(d: dict) -> str:
     return "\n".join(out)[:12000]
 
 
+def selection_note() -> str:
+    """사람이 쓴 기술 선정 사유. config가 원본이다.
+
+    과제는 기술 선정을 2안(사람이 직접)으로 하라고 했다. 그러므로 선정 사유는
+    생성할 것이 아니라 옮겨 적을 것이다. 3차 보고서가 이 재료를 못 받아서
+    "질의-정답 쌍을 기준으로 임베딩 후보를 평가하여 선정했다"는 엉뚱한 문장을
+    지어냈다. 기술 선정과 임베딩 선정을 뒤섞은 것이다.
+    """
+    lines = ["선정 방식: 2안. 에이전트가 아니라 사람이 Doc Pool에서 진영별로 하나씩 직접 골랐다.",
+             "",
+             "공통 선정 기준: 진입 비용의 대칭성. 한쪽은 하드웨어를 그대로 두는 대신 "
+             "모델을 처음부터 다시 학습해야 하고, 다른 쪽은 모델을 그대로 두는 대신 "
+             "새 메모리 하드웨어를 들여야 한다. 같은 병목을 두고 무엇을 바꿀 것인지가 "
+             "정반대라서, 우열을 판정하지 않고도 관점에 따라 평가가 갈리는 모습을 "
+             "드러낼 수 있다.",
+             ""]
+    for t in config.TECHS:
+        lines.append(f"{t['id']} ({t['camp_label']}): {t['why']}")
+    lines += ["", "같은 Doc Pool에서 뺀 후보와 그 이유:"]
+    for name, why in config.NOT_SELECTED.items():
+        lines.append(f"  {name}: {why}")
+    return "\n".join(lines)
+
+
 def _dump_briefs(d: dict) -> str:
     out = []
     for tid, b in d.items():
@@ -380,6 +435,7 @@ def make_report(setup_note: str, limits_fn, extra_numbers: str = ""):
         md = ask(
             prompts.REPORT_SYS,
             prompts.REPORT_USER.format(
+                selection=selection_note(),
                 names="\n".join(
                     f"- {t['id']} = {t['full_name']} ({t['camp_label']})"
                     for t in s["techs"]),
@@ -507,10 +563,8 @@ def verify(s: EvalState) -> dict:
             continue
         plain = CITE.sub("", unit)
         for tok in set(TOKEN.findall(plain)):
-            probe = re.sub(r"\s+", "", tok).lower().rstrip("%배×")
-            if len(probe) < 3 or probe in backing.replace(" ", ""):
-                continue
-            mismatched.append(f"'{tok}' (꼬리표 {', '.join(pool_tags)})")
+            if not backed_by(tok, backing):
+                mismatched.append(f"'{tok}' (꼬리표 {', '.join(pool_tags)})")
     if mismatched:
         problems.append(
             "꼬리표가 가리키는 쪽에 없는 표기를 그 꼬리표로 인용했다: "

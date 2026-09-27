@@ -222,3 +222,27 @@ def test_참고문헌_기관명을_호스트에서_만든다():
     assert site_name("https://www.snia.org/x") == "SNIA"
     assert host_of("https://www.spheron.network/blog/x") == "spheron.network"
     assert site_name("") == "출처 미상"
+
+
+# ---------------------------------------------------------------- 레드팀 5차
+def test_단위가_다르면_근거로_보지_않는다():
+    """'64배'에 [MLA p.6]을 달았는데 그 쪽에는 64가 차원 값으로만 있었다."""
+    from agents.nodes import backed_by
+    dims = "with 64 heads and a head dimension of 128 per layer"
+    speed = "boosts the maximum generation throughput to 5.76 times"
+    assert not backed_by("64배", dims), "차원 값 64를 배수 근거로 보면 안 된다"
+    assert backed_by("5.76배", speed), "배수 근거는 받아들여야 한다"
+    assert backed_by("93.3%", "reduces the KV cache by 93.3%")
+    assert not backed_by("93.3%", "the layer index 93.3 appears here")
+
+
+def test_기술_선정_사유가_사람이_쓴_것인가():
+    """과제가 2안(사람이 직접)을 요구하므로 선정 사유는 생성물이 아니어야 한다."""
+    import config
+    from agents.nodes import selection_note
+    note = selection_note()
+    assert "2안" in note and "사람이" in note
+    for t in config.TECHS:
+        assert t["why"][:20] in note, f"{t['id']}의 선정 사유가 빠졌다"
+    for name in config.NOT_SELECTED:
+        assert name in note, f"뺀 후보 {name}이 빠졌다"
