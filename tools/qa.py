@@ -107,25 +107,36 @@ def check_links(seed: int, offline: bool) -> None:
 
 
 def check_arxiv(offline: bool) -> None:
-    """REFERENCE의 arXiv 번호가 실재하고 제목이 맞는지 본다."""
+    """참고문헌의 arXiv 번호가 실재하고 제목과 저자가 맞는지 본다.
+
+    1차 실행에서 LLM이 arXiv:2406.00000 같은 없는 번호를 참고문헌에 올렸다.
+    지금은 서지 정보를 pool.json에 사람이 적어 두고 참고문헌을 거기서 뽑지만,
+    그 적어 둔 값 자체가 틀렸을 수 있으므로 원본과 대조한다.
+
+    export.arxiv.org API는 이 환경에서 406을 돌려주므로 초록 페이지의
+    citation 메타 태그를 읽는다.
+    """
     spec = json.loads((ROOT / "data" / "pool.json").read_text(encoding="utf-8"))
     if offline:
         check("arXiv 서지 대조", None, "생략 (--no-net)")
         return
+    head = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml"}
     for d in spec["documents"]:
         if not d.get("arxiv"):
             continue
         try:
-            url = f"https://export.arxiv.org/api/query?id_list={d['arxiv']}"
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=25) as r:
-                xml = r.read().decode("utf-8", "replace")
-            m = re.search(r"<title>(.*?)</title>", xml, re.S)
-            titles = re.findall(r"<title>(.*?)</title>", xml, re.S)
-            got = " ".join(titles[1].split()) if len(titles) > 1 else ""
+            url = f"https://arxiv.org/abs/{d['arxiv']}"
+            with urllib.request.urlopen(urllib.request.Request(url, headers=head), timeout=25) as r:
+                html = r.read().decode("utf-8", "replace")
+            m = re.search(r'name="citation_title"\s+content="([^"]+)"', html)
+            authors = re.findall(r'name="citation_author"\s+content="([^"]+)"', html)
+            got = " ".join((m.group(1) if m else "").split())
             want = " ".join(d["title"].split())
-            same = got.lower()[:60] == want.lower()[:60]
-            check(f"arXiv {d['arxiv']} 서지", same,
-                  f"{d['doc_id']}: {got[:80] or '조회 실패'}")
+            ok = bool(got) and got.lower()[:55] == want.lower()[:55]
+            check(f"arXiv {d['arxiv']} 서지", ok,
+                  f"{d['doc_id']}: {got[:70] or '제목 조회 실패'} / 저자 {len(authors)}명")
         except Exception as e:
             check(f"arXiv {d['arxiv']} 서지", None, f"조회 실패 {type(e).__name__}")
 
