@@ -59,7 +59,9 @@ def make_web_search():
             return []
         items = res.get("results", []) if isinstance(res, dict) else []
         return [{"title": i.get("title", ""), "url": i.get("url", ""),
-                 "content": i.get("content", "")} for i in items]
+                 "content": i.get("content", ""),
+                 # 검색 도구가 줄 때만 있다. 없으면 참고문헌에 작성일 미상으로 적는다.
+                 "published": i.get("published_date", "") or ""} for i in items]
 
     return search
 

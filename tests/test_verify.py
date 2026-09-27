@@ -212,3 +212,13 @@ def test_꼬리표의_세로줄이_표를_깨지_않는다():
     """웹 제목의 '제목 | 사이트명'이 마크다운 표의 칸 구분자로 읽히던 문제."""
     assert "|" not in short_title("LLM Cost Optimization Market Size | CAGR of 26%")
     assert norm_cite("웹: A | B") == norm_cite("웹: A / B")
+
+
+def test_참고문헌_기관명을_호스트에서_만든다():
+    """과제가 웹 출처에 기관명과 사이트명을 요구하는데 검색 도구는 제목과 URL만 준다."""
+    from agents.nodes import host_of, site_name
+    assert site_name("https://arxiv.org/html/2602.21548v1") == "arXiv"
+    assert site_name("https://marketintelo.com/report/cxl") == "Market Intelo"
+    assert site_name("https://www.snia.org/x") == "SNIA"
+    assert host_of("https://www.spheron.network/blog/x") == "spheron.network"
+    assert site_name("") == "출처 미상"

@@ -95,6 +95,40 @@ def probe_urls(urls: list[str], timeout: int = 12) -> dict[str, bool]:
         return {u: True for u in urls}      # 확인 자체가 막히면 판단하지 않는다
 
 
+# 호스트에서 읽을 수 있는 기관명을 만든다. 과제가 웹 출처에 기관명과
+# 사이트명을 요구하는데 검색 도구는 제목과 URL만 준다.
+SITE_NAMES = {
+    "arxiv.org": "arXiv", "github.com": "GitHub", "dl.acm.org": "ACM Digital Library",
+    "aclanthology.org": "ACL Anthology", "computer.org": "IEEE Computer Society",
+    "snia.org": "SNIA", "youtube.com": "YouTube", "linkedin.com": "LinkedIn",
+    "medium.com": "Medium", "market.us": "Market.us", "marketintelo.com": "Market Intelo",
+    "mordorintelligence.com": "Mordor Intelligence", "gminsights.com": "Global Market Insights",
+    "fortunebusinessinsights.com": "Fortune Business Insights",
+    "semiconductor.samsung.com": "Samsung Semiconductor", "news.skhynix.com": "SK hynix Newsroom",
+    "docs.vllm.ai": "vLLM Docs", "vllm.ai": "vLLM", "huggingface.co": "Hugging Face",
+    "nvidia.com": "NVIDIA", "baseten.co": "Baseten", "spheron.network": "Spheron Network",
+    "acecloud.ai": "Ace Cloud", "introl.com": "Introl", "substack.com": "Substack",
+    "trendforce.com": "TrendForce", "semianalysis.com": "SemiAnalysis",
+}
+
+
+def host_of(url: str) -> str:
+    return re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0].lower()
+
+
+def site_name(url: str) -> str:
+    """기관명으로 쓸 읽을 수 있는 이름."""
+    host = host_of(url)
+    if not host:
+        return "출처 미상"
+    for known, name in SITE_NAMES.items():
+        if host == known or host.endswith("." + known):
+            return name
+    # github.io 같은 개인 도메인은 앞부분을 이름으로 본다
+    base = host.split(".")[0] if host.count(".") >= 1 else host
+    return base.replace("-", " ").title()
+
+
 def source_tier(url: str) -> str:
     """일차 자료, 시장조사 요약, 기타 이차 자료로 가른다."""
     host = re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0].lower()
@@ -107,13 +141,15 @@ def source_tier(url: str) -> str:
 
 # ---------------------------------------------------------------- 근거 원장
 def _mk(tech: str, perspective: str, stance: str, full: str, cite: str,
-        source_type: str, url: str = "", tier: str = "문서") -> dict:
+        source_type: str, url: str = "", tier: str = "문서",
+        published: str = "") -> dict:
     return {
         "id": f"E{abs(hash((tech, perspective, cite, full[:120]))) % 1000000:06d}",
         "tech": tech, "perspective": perspective, "stance": stance,
         "claim": " ".join(full.split())[:400],     # 프롬프트와 화면 표시용
         "full": " ".join(full.split()),            # 수치 대조용. 자르지 않는다
         "cite": norm_cite(cite), "source_type": source_type, "url": url, "tier": tier,
+        "published": published,
     }
 
 
@@ -151,7 +187,7 @@ def _harvest(res: dict, tech: str, perspective: str, stance: str) -> list[dict]:
     for w in res.get("web", [])[:4]:
         ev.append(_mk(tech, perspective, stance, w.get("content") or "",
                       f"웹: {short_title(w.get('title'))}", "web", w.get("url", ""),
-                      source_tier(w.get("url", ""))))
+                      source_tier(w.get("url", "")), w.get("published", "")))
     return ev
 
 
@@ -371,10 +407,13 @@ def attach_reference(md: str, s: EvalState) -> str:
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
 
     tags = {norm_cite(t) for t in CITE.findall(body)}
-    url_by_title = {}
+    url_by_title, pub_by_title = {}, {}
     for e in s.get("evidence", []):
         if e["source_type"] == "web" and e.get("url"):
-            url_by_title.setdefault(norm_cite(e["cite"]), e["url"])
+            c = norm_cite(e["cite"])
+            url_by_title.setdefault(c, e["url"])
+            if e.get("published"):
+                pub_by_title.setdefault(c, e["published"][:10])
 
     papers, webs = [], []
     for doc_id, meta in POOL_META.items():
@@ -387,12 +426,19 @@ def attach_reference(md: str, s: EvalState) -> str:
                   if t.startswith("웹:") and t in url_by_title]
     alive = probe_urls(cited_urls)
     today = date.today().isoformat()
+    # 과제가 요구하는 웹 출처 형식은 다음과 같다.
+    #   기관명 또는 작성자(YYYY-MM-DD). 제목. 사이트명, URL
+    # 검색 도구가 작성일을 주지 않는 경우가 많다. 모르는 것을 지어내지 않고
+    # 작성일 미상이라고 적는다.
     for t in sorted(tags):
         if not (t.startswith("웹:") and t in url_by_title):
             continue
         u = url_by_title[t]
+        published = pub_by_title.get(t, "")
+        when = published if published else "작성일 미상"
         mark = "" if alive.get(u, True) else f" (접속 확인 실패, {today} 기준)"
-        webs.append(f"- {t[2:].strip()}. {u}{mark}")
+        webs.append(f"- {site_name(u)}({when}). *{t[2:].strip()}*. "
+                    f"{host_of(u)}, {u}{mark}")
 
     lines = ["", "## REFERENCE", "",
              "본문에 인용 꼬리표로 실제 사용한 자료만 적는다. 목록은 근거 원장에서 자동으로 뽑았다.", ""]
