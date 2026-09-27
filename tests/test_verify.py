@@ -1,0 +1,172 @@
+"""보고서 검증기 회귀 테스트.
+
+레드팀을 세 번 돌리며 나온 실패를 하나씩 고정한다. 검증기를 고치다가
+예전에 잡던 것을 놓치는 일이 실제로 있었다. 고친 것이 계속 잡히는지,
+멀쩡한 보고서를 틀렸다고 하지는 않는지 둘 다 본다.
+
+API 키 없이 돈다.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from agents.nodes import short_title, source_tier, verify  # noqa: E402
+
+SKELETON = """# SUMMARY
+요약이다.
+
+## 1. 분석 배경
+배경이다.
+
+## 2. 기술 선정
+선정이다.
+
+## 3. 기술 개요
+개요다.
+
+## 4. 관점별 평가
+{body}
+
+## 5. 시사점
+시사점이다.
+
+## 6. 한계점
+한계다.
+"""
+
+EVIDENCE = [
+    {"cite": "MLA p.1", "source_type": "pool", "tier": "문서",
+     "full": "DeepSeek-V2 reduces the KV cache by 93.3% and boosts the maximum "
+             "generation throughput to 5.76 times, saving 42.5% of training costs."},
+    {"cite": "MLA p.6", "source_type": "pool", "tier": "문서",
+     "full": "Multi-Head Latent Attention boosting inference efficiency. "
+             "Conventional Transformer models usually adopt Multi-Head Attention."},
+    {"cite": "ITME p.10", "source_type": "pool", "tier": "문서",
+     "full": "ITME achieves up to a 35.7% throughput improvement over the "
+             "CPU-offload baseline in these extended turns."},
+    {"cite": "웹: CXL Memory Expansion Market Research Report", "source_type": "web",
+     "tier": "시장조사", "url": "https://marketintelo.com/report/cxl",
+     "full": "The CXL memory expansion market reaches 1.3 billion in 2025."},
+]
+
+
+def run(body: str, evidence: list | None = None) -> list[str]:
+    state = {"report_md": SKELETON.format(body=body),
+             "evidence": evidence if evidence is not None else EVIDENCE}
+    return verify(state)["verify"]["problems"]
+
+
+def has(problems: list[str], needle: str) -> bool:
+    return any(needle in p for p in problems)
+
+
+# ---------------------------------------------------------------- 통과해야 하는 경우
+def test_올바른_인용은_통과한다():
+    body = ("| 기준 | MLA | ITME |\n"
+            "| 압축률 | KV cache를 93.3% 줄였다[MLA p.1] | 근거 없음 |\n"
+            "| 처리량 | 최대 생성 처리량이 5.76배로 올랐다[MLA p.1] | "
+            "CPU 오프로딩 대비 35.7% 향상이다[ITME p.10] |\n"
+            "| 학습비용 | 42.5% 절감이다[MLA p.1] | 근거 없음 |\n"
+            "| 구조 | 기존 어텐션을 바꾼다[MLA p.6] | 근거 없음 |\n"
+            "| 시장 | 근거 없음 | 1.3 billion 달러다"
+            "[웹: CXL Memory Expansion Market Research Report] |\n")
+    assert run(body) == []
+
+
+# ---------------------------------------------------------------- 레드팀 1차
+def test_원장에_없는_꼬리표를_잡는다():
+    body = "압축률이 높다[MLA p.99]. " * 6
+    assert has(run(body), "근거 원장에 없는 인용 꼬리표")
+
+
+def test_필수_장이_빠지면_잡는다():
+    state = {"report_md": "# SUMMARY\n요약만 있다.\n", "evidence": EVIDENCE}
+    problems = verify(state)["verify"]["problems"]
+    assert has(problems, "## 1.")
+    assert has(problems, "## 6.")
+
+
+# ---------------------------------------------------------------- 레드팀 2차
+@pytest.mark.parametrize("word", ["우수", "더 낫", "추천", "압도적", "뛰어난"])
+def test_우열_판정_표현을_잡는다(word):
+    body = f"MLA가 {word}다[MLA p.1]. " * 6
+    assert has(run(body), "우열을 판정하는 표현")
+
+
+def test_근거에_없는_숫자를_잡는다():
+    body = "압축률이 77.7퍼센트다[MLA p.1]. " * 6
+    assert has(run(body), "근거 원문에 없는 숫자")
+
+
+# ---------------------------------------------------------------- 레드팀 3차
+def test_꼬리표가_받치지_않는_인용을_잡는다():
+    """웹에서 본 주장에 논문 꼬리표를 붙인 실제 사례를 고정한다.
+
+    MLA p.6은 어텐션 구조 설명이라 Llama2-7B도 3퍼센트 손실도 없다.
+    """
+    body = ("| 기준 | MLA |\n"
+            "| 정확도 | Llama2-7B 변환 시 3% 손실이다[MLA p.6] |\n"
+            "| 압축률 | 93.3% 줄였다[MLA p.1] |\n"
+            "| 처리량 | 5.76배다[MLA p.1] |\n"
+            "| 비용 | 42.5% 절감이다[MLA p.1] |\n"
+            "| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    problems = run(body)
+    assert has(problems, "꼬리표가 가리키는 쪽에 없는 표기")
+    assert has(problems, "Llama2-7B")
+
+
+def test_단위를_바꿔_적으면_잡는다():
+    body = ("| 기준 | 값 |\n"
+            "| 시장 | 2025년 13억 달러다[웹: CXL Memory Expansion Market Research Report] |\n"
+            "| 압축률 | 93.3% 줄였다[MLA p.1] |\n"
+            "| 처리량 | 5.76배다[MLA p.1] |\n"
+            "| 비용 | 42.5% 절감이다[MLA p.1] |\n"
+            "| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    assert has(run(body), "단위를 바꿔 적었다")
+
+
+def test_웹_근거에_쪽수를_붙이면_잡는다():
+    body = "시장이 크다[웹: CXL Memory Expansion Market Research Report p.3]. " * 6
+    assert has(run(body), "웹 근거에 쪽수가 붙었다")
+
+
+def test_4장에_근거가_없으면_잡는다():
+    body = "표도 인용도 없이 서술만 한다."
+    assert has(run(body), "인용 꼬리표가 너무 적다")
+
+
+# ---------------------------------------------------------------- 보조 함수
+def test_꼬리표_제목은_단어_경계에서_잘린다():
+    """55자에서 그냥 자르면 끝에 공백이 남아 원장과 보고서가 어긋났다."""
+    t = short_title("DualPath: Breaking the Storage Bandwidth Bottleneck in Agentic LLM Inference")
+    assert len(t) <= 55
+    assert t == t.rstrip()
+    assert not t.endswith(",")
+
+
+def test_짧은_제목은_그대로_둔다():
+    assert short_title("MLA on GPU Cloud") == "MLA on GPU Cloud"
+
+
+def test_빈_제목을_견딘다():
+    assert short_title(None) == "제목 없음"
+    assert short_title("") == "제목 없음"
+
+
+@pytest.mark.parametrize("url,tier", [
+    ("https://arxiv.org/abs/2405.04434", "일차"),
+    ("https://github.com/vllm-project/vllm", "일차"),
+    ("https://docs.vllm.ai/en/latest/", "일차"),
+    ("https://news.skhynix.com/en/fms-2026/", "일차"),
+    ("https://marketintelo.com/report/cxl", "시장조사"),
+    ("https://www.statista.com/x", "시장조사"),
+    ("https://www.spheron.network/blog/x", "이차"),
+    ("", "이차"),
+])
+def test_출처_등급을_가른다(url, tier):
+    assert source_tier(url) == tier
