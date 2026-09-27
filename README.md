@@ -145,6 +145,7 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 ├── tools/
 │   ├── draw_graph.py      # 그래프 다이어그램 출력
 │   ├── md2pdf.py          # 보고서 PDF 변환과 쪽수 검사
+│   ├── repair.py          # 검증기가 잡은 문장을 기계적으로 정정
 │   └── qa.py              # 제출 전 최종 점검 12항목
 ├── outputs/               # 보고서와 실행 State
 ├── config.py              # 평가 대상, 관점별 기준, 편향 방지 장치
@@ -172,6 +173,7 @@ python app.py compare         # 두 실행의 결론이 갈리는지 비교
 python eval/loader_probe.py   # PDF 로더 비교 실측 재현
 python eval/embed_bench.py    # 임베딩 후보 비교 실측 재현
 python tools/md2pdf.py outputs/report_seed0.md   # PDF 변환과 쪽수 검사
+python tools/repair.py outputs/report_seed0.md   # 검증기 지적 자동 정정
 python tools/qa.py            # 제출 전 최종 점검
 pytest tests/                 # 검증기와 그래프 구조 테스트 (API 키 불필요)
 ```
@@ -195,7 +197,12 @@ pytest tests/                 # 검증기와 그래프 구조 테스트 (API 키
 | URL 생존 확인 | 참고문헌 9건 중 3건이 404와 403이었음 |
 | 정식 명칭 고정 | ITME를 `Inter-Tier Memory Expansion`으로 지어냄 |
 | 기법과 모델 분리 | DeepSeek-V2 **모델**의 규모를 MLA **기법**의 요구 사항으로 적음 |
+| 공개 연도 대조 | 두 기술의 공개 연도를 뒤바꿔 적음 (MLA 2026, ITME 2024) |
 | 쪽수 제한 | 문서 풀 200쪽, 보고서 10쪽 |
+
+검증기가 잡은 것 중 규칙이 분명한 것은 `tools/repair.py`가 LLM 없이 정정함.
+잘린 꼬리표 복원, 수치가 실제로 있는 출처로 꼬리표 교정, 단위 복원, 연도 교정,
+그리고 문서 풀 어디에도 근거가 없는 항목은 `근거 없음`으로 내림.
 
 ## Contributors
 

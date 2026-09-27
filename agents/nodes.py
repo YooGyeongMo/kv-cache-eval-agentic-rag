@@ -102,7 +102,7 @@ def _mk(tech: str, perspective: str, stance: str, full: str, cite: str,
         "tech": tech, "perspective": perspective, "stance": stance,
         "claim": " ".join(full.split())[:400],     # 프롬프트와 화면 표시용
         "full": " ".join(full.split()),            # 수치 대조용. 자르지 않는다
-        "cite": cite, "source_type": source_type, "url": url, "tier": tier,
+        "cite": cite.strip(), "source_type": source_type, "url": url, "tier": tier,
     }
 
 
@@ -361,7 +361,7 @@ def attach_reference(md: str, s: EvalState) -> str:
     url_by_title = {}
     for e in s.get("evidence", []):
         if e["source_type"] == "web" and e.get("url"):
-            url_by_title.setdefault(e["cite"], e["url"])
+            url_by_title.setdefault(e["cite"].strip(), e["url"])
 
     papers, webs = [], []
     for doc_id, meta in POOL_META.items():
@@ -408,7 +408,10 @@ def verify(s: EvalState) -> dict:
                             f"맥락: ...{m.group(0) if m else ''}...")
 
     # 2) 인용 꼬리표 대조. 근거 원장에 없는 꼬리표는 지어낸 출처다.
-    known = {e["cite"] for e in s.get("evidence", [])}
+    #    양쪽 다 공백을 털고 비교한다. 예전 절단 방식이 꼬리표 끝에 공백을
+    #    남겨, 보고서가 공백 없이 옮겨 적으면 멀쩡한 인용이 지어낸 것으로
+    #    판정되던 일이 있었다.
+    known = {e["cite"].strip() for e in s.get("evidence", [])}
     bad_tags = []
     for t in {x.strip() for x in CITE.findall(body)}:
         if t in known:
@@ -430,8 +433,10 @@ def verify(s: EvalState) -> dict:
     # 꼬리표가 가리키는 근거 안에 그 수치와 고유 표기가 있는지 확인한다.
     by_cite: dict[str, str] = {}
     for e in s.get("evidence", []):
-        by_cite[e["cite"]] = by_cite.get(e["cite"], "") + " " + e.get("full", "")
-    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[\w.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
+        c = e["cite"].strip()
+        by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
+    # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙어 버린다. 아스키로 제한한다.
+    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
     mismatched = []
     for unit in re.split(r"(?<=[.。])\s+|\n|\|", body):
         tags = [t.strip() for t in CITE.findall(unit)]
@@ -452,6 +457,19 @@ def verify(s: EvalState) -> dict:
             "꼬리표가 가리키는 쪽에 없는 표기를 그 꼬리표로 인용했다: "
             + ", ".join(sorted(set(mismatched))[:8])
             + ". 그 내용이 실제로 나온 근거의 꼬리표를 달거나 문장을 뺀다.")
+
+    # 2-1b) 기술에 붙은 연도가 서지 정보와 맞는지.
+    #
+    # 수치 대조에서 연도를 제외해 두었더니 "MLA 2026년, ITME 2024년"처럼
+    # 두 기술의 공개 연도가 뒤바뀐 채로 통과했다. 연도는 그 자체로는
+    # 흔한 숫자라 일반 대조에 넣을 수 없으므로 따로 본다.
+    years = {d: m.get("year") for d, m in POOL_META.items() if m.get("year")}
+    for doc, year in years.items():
+        for m in re.finditer(rf"{re.escape(doc)}[^.。\n|]{{0,12}}?(\d{{4}})\s*년", body):
+            if m.group(1) != year:
+                problems.append(
+                    f"{doc}의 공개 연도를 {m.group(1)}년으로 적었다. "
+                    f"서지 정보는 {year}년이다.")
 
     # 2-2) 단위를 바꿔 적었는지. 원문이 billion이면 억으로 고치지 않는다.
     for m in re.finditer(r"\d[\d,.]*\s*(억|만)\s*달러", body):
