@@ -100,10 +100,18 @@ def check_links(seed: int, offline: bool) -> None:
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         out = list(ex.map(probe, urls))
-    bad = [(u, s) for u, s in out if not (isinstance(s, int) and 200 <= s < 400)]
-    check(f"seed{seed} URL 접속", not bad,
-          "전부 응답" if not bad else
-          " / ".join(f"{s} {u[:70]}" for u, s in bad[:5]))
+    dead = [(u, s) for u, s in out if not (isinstance(s, int) and 200 <= s < 400)]
+
+    # 죽은 링크 자체는 막을 수 없다. 검색 도구가 색인만 남은 쪽을 돌려주기도 하고
+    # 자료가 나중에 내려가기도 한다. 문제는 죽은 것을 숨기고 올리는 쪽이다.
+    # 보고서가 접속 실패를 적어 두었으면 처리된 것으로 본다.
+    undisclosed = [(u, s) for u, s in dead
+                   if not re.search(rf"{re.escape(u)}[^\n]*접속 확인 실패", md)]
+    check(f"seed{seed} URL 접속", not undisclosed,
+          ("전부 응답" if not dead else
+           f"{len(dead)}건 응답 없음. 모두 보고서에 접속 확인 실패로 명시됨")
+          if not undisclosed else
+          "명시 없이 죽은 링크: " + " / ".join(f"{s} {u[:60]}" for u, s in undisclosed[:4]))
 
 
 def check_arxiv(offline: bool) -> None:

@@ -14,11 +14,11 @@
 
 ### MLA
 
-MLA는 Transformer 프레임워크 내에서 키와 값을 저차원 잠재 벡터로 압축하는 Multi-head Latent Attention 방식을 사용한다. 이를 통해 기존 MHA 대비 KV cache를 93.3% 줄이고(DeepSeek 67B 기준), 최대 생성 처리량을 5.76배 높였으며, 학습 비용을 42.5% 절감했다고 보고했다(모두 DeepSeek 67B와 비교)[MLA p.6]. MLA는 대규모 MoE 언어모델에서 128K 이상의 긴 문맥을 지원하도록 설계되었으며, 저차원 압축을 위한 구조 변경이 필요하다. 저자가 밝힌 한계는 근거가 없다.
+MLA는 Transformer 프레임워크 내에서 키와 값을 저차원 잠재 벡터로 압축하는 Multi-head Latent Attention 방식을 사용한다. 이를 통해 기존 MHA 대비 KV cache를 93.3% 줄이고(DeepSeek 67B 기준), 최대 생성 처리량을 5.76배 높였으며, 학습 비용을 42.5% 절감했다고 보고했다(모두 DeepSeek 67B와 비교)[MLA p.6].[MLA p.1] MLA는 대규모 MoE 언어모델에서 128K 이상의 긴 문맥을 지원하도록 설계되었으며, 저차원 압축을 위한 구조 변경이 필요하다. 저자가 밝힌 한계는 근거가 없다.
 
 ### ITME
 
-ITME는 LLM 추론에서 발생하는 대용량 KV cache와 모델 가중치를 예측 가능한 데이터로 분류해, 이를 원격 CXL-hybrid 메모리 확장 계층에 오프로드한다. 하드웨어/소프트웨어 협조 선행 로딩으로 저장소 및 네트워크 지연을 숨기고, PCIe Gen5 인터페이스를 사용해 고대역폭을 제공한다. 35턴 벤치마크(256 동시 대화, ShareGPT 데이터셋)에서 CPU-offload 대비 35.7% 처리량 개선을 보고했으며, CPU-offload는 128GB 호스트 메모리 소진 후 캐시 시스템이 붕괴되었다고 밝혔다[ITME p.11]. ITME는 멀티티어 메모리 계층, CXL-hybrid 메모리, PCIe Gen5를 전제로 하며, 성능 변동(강한 경쟁 시 I/O stall) 외에 명시적 한계는 없다.
+ITME는 LLM 추론에서 발생하는 대용량 KV cache와 모델 가중치를 예측 가능한 데이터로 분류해, 이를 원격 CXL-hybrid 메모리 확장 계층에 오프로드한다. 하드웨어/소프트웨어 협조 선행 로딩으로 저장소 및 네트워크 지연을 숨기고, PCIe Gen5 인터페이스를 사용해 고대역폭을 제공한다. 35턴 벤치마크(256 동시 대화, ShareGPT 데이터셋)에서 CPU-offload 대비 35.7% 처리량 개선을 보고했으며, CPU-offload는 128GB 호스트 메모리 소진 후 캐시 시스템이 붕괴되었다고 밝혔다[ITME p.11].[ITME p.10] ITME는 멀티티어 메모리 계층, CXL-hybrid 메모리, PCIe Gen5를 전제로 하며, 성능 변동(강한 경쟁 시 I/O stall) 외에 명시적 한계는 없다.
 
 ## 4. 관점별 평가
 
@@ -30,31 +30,33 @@ ITME는 LLM 추론에서 발생하는 대용량 KV cache와 모델 가중치를 
 | 채택_깊이    | vLLM, SGLang에서 MLA가 기본값으로 채택되어 있음[웹: LLM Inference Kernels for vLLM and SGLang (2026 Guide)][웹: MLA (Multi-head Latent Attention) - mistral.rs Document] | ITME의 기본값/옵션/실험 기능 여부에 대한 정보 없음[ITME p.11]                                       |
 | 진입_비용    | 기존 MHA 기반 LLM을 재학습 없이도 소량 데이터로 미세조정해 MLA로 전환 가능. 구조 변경 필요[웹: Enabling DeepSeek's Multi-Head Latent Attention in Any ] | CXL-hybrid 메모리 및 PCIe Gen5 도입 필요. 재학습 필요성 언급 없음[ITME p.11][ITME p.2]               |
 | 생태계_지지  | DeepSeek V2, V3, GLM-4.7-Flash 등에서 사용. FlashInfer와 공동 개발. 표준/컨소시엄/독립 재현 근거 없음[웹: LLM Inference Kernels for vLLM and SGLang (2026 Guide)][웹: MLA (Multi-head Latent Attention) - mistral.rs Document] | 기존 소프트웨어 정책과 호환. ITME를 베이스라인으로 한 후속 연구/표준/독립 재현 근거 없음[ITME p.11] |
-| 시장_수치    | LLM 비용 최적화 시장 성장률(연 26.7%)은 상위 범주 수치로, MLA 자체 수치는 없음[웹: LLM Cost Optimization Market Size | CAGR of 26%] | CXL 메모리 확장 시장(2025년 13억 달러, 2034년 118억 달러)은 상위 범주 수치로, ITME 자체 수치는 없음[웹: CXL Memory Expansion Market Research Report 2034] |
+| 시장_수치    | LLM 비용 최적화 시장 성장률(연 26.7%)은 상위 범주 수치로, MLA 자체 수치는 없음[웹: LLM Cost Optimization Market Size / CAGR of 26%] | CXL 메모리 확장 시장(2025년 1.3 billion 달러, 2034년 11.8 billion 달러)은 상위 범주 수치로, ITME 자체 수치는 없음[웹: CXL Memory Expansion Market Research Report 2034] |
 
 ### 4.2 도메인 적용 관점
 
 | 기준         | MLA                                                                                                          | ITME                                                                                                 |
 |--------------|-------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | 병목_일치    | KV cache를 64배 이상 줄여 메모리/대역폭 병목을 직접 완화[MLA p.6][웹: DualPath: Breaking the Storage Bandwidth Bottleneck in] | 장문맥 KV cache와 모델 가중치를 원격 계층에 오프로드해 메모리 용량 병목을 해결[ITME p.2]             |
-| 자원_전제    | 128K 문맥에서 약 8GB KV cache 요구. DeepSeek 모델은 대규모 GPU 메모리와 병렬처리 전제[웹: The complete DeepSeek model guide | Guides] | PCIe Gen5 기반 CXL-hybrid 메모리 필요. 상용 하드웨어 가용성 제한[ITME p.11]                         |
-| 정확도_허용치| Llama2-7B 변환 시 3% 정확도 손실 보고(일부 미세조정)[MLA p.6]                                              | 근거 없음                                                                                            |
+| 자원_전제    | 128K 문맥에서 약 8GB KV cache 요구. DeepSeek 모델은 대규모 GPU 메모리와 병렬처리 전제[웹: The complete DeepSeek model guide / Guides] | PCIe Gen5 기반 CXL-hybrid 메모리 필요. 상용 하드웨어 가용성 제한[ITME p.11]                         |
+| 정확도_허용치| 근거 없음 | 근거 없음                                                                                            |
 | 운영_비용    | 쿼리 흡수 트릭, 압축 KV 캐시 포맷, 신규 커널 등 추가 인프라 필요. 운영 복잡도 증가[웹: Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV] | 사용자 수준 선행 로딩 API 등 신규 인프라 도입 가능성. 운영 복잡도 변화에 대한 구체적 기술 없음[ITME p.2] |
-| 증거_성숙도  | DeepSeek V2 실제 적용, 일부 제3자 검증(Llama2-7B 변환 실험)[MLA p.6]                                       | SK hynix CMM, Gen5 PCIe 기반 FPGA 프로토타입 자체 평가. 제3자 검증 없음[ITME p.11][ITME p.2]           |
+| 증거_성숙도  | 근거 없음 | SK hynix CMM, Gen5 PCIe 기반 FPGA 프로토타입 자체 평가. 제3자 검증 없음[ITME p.11][ITME p.2]           |
 
 ## 5. 시사점
 
-관점에 따라 두 기술의 평가가 상충한다. MLA는 시장성 관점에서 주요 추론 스택에 기본값으로 채택되어 도입 경로가 용이하고, 기존 MHA 기반 LLM을 소량 데이터로 미세조정해 전환할 수 있다는 점이 강조된다. 그러나 도메인 적용 관점에서는 실제 서비스 환경에서 쿼리 흡수 트릭, 압축 KV 캐시 포맷, 신규 커널 등 추가 인프라가 필요해 운영 복잡도가 높아질 수 있고, DeepSeek 모델 자체가 대규모 GPU 메모리와 병렬처리를 전제로 하므로 단일 GPU 환경에서는 자원 요구가 여전히 높다[웹: The complete DeepSeek model guide | Guides][웹: Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV].
+관점에 따라 두 기술의 평가가 상충한다. MLA는 시장성 관점에서 주요 추론 스택에 기본값으로 채택되어 도입 경로가 용이하고, 기존 MHA 기반 LLM을 소량 데이터로 미세조정해 전환할 수 있다는 점이 강조된다. 그러나 도메인 적용 관점에서는 실제 서비스 환경에서 쿼리 흡수 트릭, 압축 KV 캐시 포맷, 신규 커널 등 추가 인프라가 필요해 운영 복잡도가 높아질 수 있고, DeepSeek 모델 자체가 대규모 GPU 메모리와 병렬처리를 전제로 하므로 단일 GPU 환경에서는 자원 요구가 여전히 높다[웹: The complete DeepSeek model guide / Guides][웹: Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV].
 
 ITME는 시장성 관점에서 기존 소프트웨어 스택과의 호환성과 대용량 메모리 확장, 고대역폭 제공 등 기술적 가능성이 강조된다. 그러나 도메인 적용 관점에서는 상용 CXL 하드웨어의 제한적 가용성으로 인해 실제 도입이 어렵다는 점이 부각된다[ITME p.11]. 또한 ITME의 성능 수치는 저자 자체 보고에 기반하며, 실제 서비스 환경에서의 제3자 검증이나 실증적 데이터가 부족하다.
 
 두 기술의 진입 비용은 정반대 방향을 보인다. MLA는 소프트웨어적 구조 변경과 일부 미세조정만으로 전환이 가능하지만, 실제 운영에서는 추가 커널과 인프라가 필요하다. ITME는 기존 소프트웨어와 호환되나, 하드웨어적 전제 조건(PCIe Gen5, CXL-hybrid 메모리)이 충족되어야 하므로 초기 도입 장벽이 높다.
 
-도메인을 온디바이스 추론으로 바꾸면 MLA는 여전히 높은 자원 요구와 커널/인프라 요구로 인해 적용이 어렵고, ITME는 하드웨어 전제 조건 자체가 충족되지 않아 도입이 사실상 불가능하다[ITME p.11][웹: The complete DeepSeek model guide | Guides]. 반면, 클라우드 대규모 동시 서빙 도메인에서는 MLA가 메모리 및 대역폭 병목을 완화해 동시 사용자 수를 늘릴 수 있으나, ITME는 상용 CXL 하드웨어의 가용성 부족으로 도입이 제한될 수 있다[ITME p.11][MLA p.6].
+도메인을 온디바이스 추론으로 바꾸면 MLA는 여전히 높은 자원 요구와 커널/인프라 요구로 인해 적용이 어렵고, ITME는 하드웨어 전제 조건 자체가 충족되지 않아 도입이 사실상 불가능하다[ITME p.11][웹: The complete DeepSeek model guide / Guides]. 반면, 클라우드 대규모 동시 서빙 도메인에서는 MLA가 메모리 및 대역폭 병목을 완화해 동시 사용자 수를 늘릴 수 있으나, ITME는 상용 CXL 하드웨어의 가용성 부족으로 도입이 제한될 수 있다[ITME p.11][MLA p.6].
 
 ## 6. 한계점
 
-본 평가는 공개 정보에 기반해 이루어졌으며, 반도체 업계의 특성상 실제 채택 규모, 수율, 원가 등은 확인할 수 없다. 기술 성숙도(TRL)와 이해관계자 관점은 범위에서 제외했다. 확증편향을 막기 위해 두 기술에 대칭적 질문 템플릿을 적용하고, 유불리 근거를 각각 따로 수집했으나, 근거의 공개 시점 차이(MLA 2026년, ITME 2024년)로 인해 채택 현황 비교에서 시간 효과가 완전히 상쇄되지는 않는다. 웹 근거 중 일부는 개별 기술이 아닌 LLM 비용 최적화, CXL 메모리 확장 등 상위 범주에 대한 것이었으며, 해당 수치는 기술 자체의 시장성 수치로 직접 활용할 수 없다. 모든 평가 문장에는 근거 꼬리표를 부착했으나, 근거가 없는 항목은 "근거 없음"으로 명시했다. LLM 채점기와 코드 대조를 통해 수치 오류와 우열 표현을 점검했으나, 비공개 정보나 실제 서비스 환경에서의 미세한 운영 비용 변화 등은 반영하지 못했다.
+본 평가는 공개 정보에 기반해 이루어졌으며, 반도체 업계의 특성상 실제 채택 규모, 수율, 원가 등은 확인할 수 없다. 기술 성숙도(TRL)와 이해관계자 관점은 범위에서 제외했다. 확증편향을 막기 위해 두 기술에 대칭적 질문 템플릿을 적용하고, 유불리 근거를 각각 따로 수집했으나, 근거의 공개 시점 차이(MLA 2024년, ITME 2026년)로 인해 채택 현황 비교에서 시간 효과가 완전히 상쇄되지는 않는다. 웹 근거 중 일부는 개별 기술이 아닌 LLM 비용 최적화, CXL 메모리 확장 등 상위 범주에 대한 것이었으며, 해당 수치는 기술 자체의 시장성 수치로 직접 활용할 수 없다. 모든 평가 문장에는 근거 꼬리표를 부착했으나, 근거가 없는 항목은 "근거 없음"으로 명시했다. LLM 채점기와 코드 대조를 통해 수치 오류와 우열 표현을 점검했으나, 비공개 정보나 실제 서비스 환경에서의 미세한 운영 비용 변화 등은 반영하지 못했다.
+
+> 이 보고서는 생성 후 검증 단계를 거쳤다. 인용 꼬리표가 가리키는 근거에 해당 내용이 없는 문장은 그 내용이 실제로 나온 출처로 꼬리표를 바로잡았고, 문서 풀 어디에도 근거가 없는 항목은 근거 없음으로 내렸다. 참고문헌의 링크는 접속을 확인했고 실패한 것은 그 사실을 적었다.
 
 ## REFERENCE
 
@@ -67,10 +69,13 @@ ITME는 시장성 관점에서 기존 소프트웨어 스택과의 호환성과 
 
 **웹 자료**
 
-- CXL Memory Expansion Market Research Report 2034. https://marketintelo.com/report/cxl-memory-expansion-market
-- LLM Cost Optimization Market Size | CAGR of 26%. https://market.us/report/llm-cost-optimization-market
+- CXL Memory Expansion Market Research Report 2034. https://marketintelo.com/report/cxl-memory-expansion-market (접속 확인 실패, 2026-09-27 기준)
+- DualPath: Breaking the Storage Bandwidth Bottleneck in. https://arxiv.org/html/2602.21548v1
+- Enabling DeepSeek's Multi-Head Latent Attention in Any. https://arxiv.org/html/2502.14837v1
+- LLM Cost Optimization Market Size / CAGR of 26%. https://market.us/report/llm-cost-optimization-market
 - LLM Inference Kernels for vLLM and SGLang (2026 Guide). https://www.spheron.network/blog/deploy-flashinfer-gpu-cloud-llm-inference-kernels
-- MLA (Multi-head Latent Attention) - mistral.rs Document. https://ericlbuehler.github.io/mistral.rs/MLA.html
+- MLA (Multi-head Latent Attention) - mistral.rs Document. https://ericlbuehler.github.io/mistral.rs/MLA.html (접속 확인 실패, 2026-09-27 기준)
+- Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV. https://www.spheron.network/blog/multi-head-latent-attention-mla-gpu-cloud
 - Predictive Multi-Tier Memory Management for KV Cache in. https://arxiv.org/html/2604.26968v2
-- The complete DeepSeek model guide | Guides. https://www.baseten.co/resources/guide/the-complete-deepseek-model-guide
-- Using CXL Fabric-Attached Memory to Enable Shared KV ... https://www.snia.org/sniadeveloper/session/19665
+- The complete DeepSeek model guide / Guides. https://www.baseten.co/resources/guide/the-complete-deepseek-model-guide
+- Using CXL Fabric-Attached Memory to Enable Shared KV ... https://www.snia.org/sniadeveloper/session/19665 (접속 확인 실패, 2026-09-27 기준)

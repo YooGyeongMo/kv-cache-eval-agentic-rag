@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.nodes import short_title, source_tier, verify  # noqa: E402
+from agents.nodes import norm_cite, short_title, source_tier, verify  # noqa: E402
 
 SKELETON = """# SUMMARY
 요약이다.
@@ -170,3 +170,45 @@ def test_빈_제목을_견딘다():
 ])
 def test_출처_등급을_가른다(url, tier):
     assert source_tier(url) == tier
+
+
+# ---------------------------------------------------------------- 레드팀 4차
+def test_공개_연도가_뒤바뀌면_잡는다():
+    """수치 대조에서 연도를 빼 두었더니 두 기술의 연도가 뒤바뀐 채 통과했다."""
+    body = ("| 기준 | 값 |\n"
+            "| 시점 | MLA 2026년, ITME 2024년 공개다[MLA p.1] |\n"
+            "| 압축률 | 93.3% 줄였다[MLA p.1] |\n"
+            "| 처리량 | 5.76배다[MLA p.1] |\n"
+            "| 비용 | 42.5% 절감이다[MLA p.1] |\n"
+            "| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    problems = run(body)
+    assert has(problems, "MLA의 공개 연도")
+    assert has(problems, "ITME의 공개 연도")
+
+
+def test_한글_조사가_붙은_영문_표기를_오탐하지_않는다():
+    """\\w가 한글까지 포함해 'Gen5를'을 한 덩어리로 잡던 거짓 양성."""
+    body = ("| 기준 | 값 |\n"
+            "| 전송 | PCIe Gen5를 사용한다[ITME p.10] |\n"
+            "| 압축률 | 93.3% 줄였다[MLA p.1] |\n"
+            "| 처리량 | 5.76배다[MLA p.1] |\n"
+            "| 비용 | 42.5% 절감이다[MLA p.1] |\n"
+            "| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    ev = EVIDENCE + [{"cite": "ITME p.10", "source_type": "pool", "tier": "문서",
+                      "full": "ITME uses a PCIe Gen5 interface to provide high bandwidth."}]
+    assert not has(run(body, ev), "Gen5")
+
+
+def test_꼬리표_공백_차이를_오탐하지_않는다():
+    """원장 꼬리표 끝에 공백이 남아도 같은 인용으로 본다."""
+    ev = [{"cite": "웹: CXL Memory Expansion Market Research Report ",
+           "source_type": "web", "tier": "시장조사",
+           "url": "https://example.com", "full": "market reaches 1.3 billion"}]
+    body = "시장이 1.3 billion 달러다[웹: CXL Memory Expansion Market Research Report]. " * 6
+    assert not has(run(body, ev), "근거 원장에 없는 인용 꼬리표")
+
+
+def test_꼬리표의_세로줄이_표를_깨지_않는다():
+    """웹 제목의 '제목 | 사이트명'이 마크다운 표의 칸 구분자로 읽히던 문제."""
+    assert "|" not in short_title("LLM Cost Optimization Market Size | CAGR of 26%")
+    assert norm_cite("웹: A | B") == norm_cite("웹: A / B")
