@@ -55,7 +55,9 @@ jobs:
 
       - name: 비밀키 유출 검사
         run: |
-          if git grep -nIE 'sk-proj-[A-Za-z0-9_-]{20}|sk-ant-|tvly-[A-Za-z0-9]{10}' -- . ; then
+          # 패턴 조각을 이어 붙인다. 통째로 적으면 이 파일 자신이 걸린다.
+          P="sk-""proj-[A-Za-z0-9_-]{20}|sk-""ant-api|tvly-""[A-Za-z0-9]{10}"
+          if git grep -nIE "$P" -- . ':!.github/workflows'; then
             echo "::error::비밀키로 보이는 문자열이 저장소에 있다"
             exit 1
           fi
