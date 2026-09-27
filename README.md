@@ -163,7 +163,8 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 uv sync --python 3.11
 cp .env.example .env          # OPENAI_API_KEY, TAVILY_API_KEY 입력
 
-python data/fetch_papers.py   # Doc Pool 논문 내려받기 (저장소에 PDF를 넣지 않음)
+python data/fetch_papers.py        # 문서 풀 논문 2편 (평가 실행에 필요한 최소)
+python data/fetch_papers.py --all  # 로더 비교 실측용 Doc Pool 후보 6편 전부
 
 python app.py final           # 색인부터 제출 PDF까지 한 번에
 
