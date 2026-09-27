@@ -35,6 +35,17 @@ POOL_META = {d["doc_id"]: d for d in
 
 CITE = re.compile(r"\[([^\[\]]{2,160}?)\]")
 
+
+def norm_cite(c: str) -> str:
+    """꼬리표 비교의 기준형.
+
+    양 끝 공백을 털고 세로줄을 바꾼다. 예전 절단 방식이 남긴 끝 공백과,
+    표에서 칸 구분자로 읽히지 않게 바꾼 세로줄 때문에 같은 인용이 서로
+    다르게 보이던 일이 있었다. 비교하는 곳마다 따로 처리하면 또 어긋나므로
+    한 군데로 모은다.
+    """
+    return " ".join(c.replace("|", "/").split())
+
 # 웹 근거의 출처 등급. 시장 평가에서 상업 조사기관 요약과 논문을 같은 무게로
 # 쓰면 평가가 부풀려진다. 등급을 근거에 붙여 두고 보고서가 구별해 쓰게 한다.
 PRIMARY_HOSTS = (
@@ -102,7 +113,7 @@ def _mk(tech: str, perspective: str, stance: str, full: str, cite: str,
         "tech": tech, "perspective": perspective, "stance": stance,
         "claim": " ".join(full.split())[:400],     # 프롬프트와 화면 표시용
         "full": " ".join(full.split()),            # 수치 대조용. 자르지 않는다
-        "cite": cite.strip(), "source_type": source_type, "url": url, "tier": tier,
+        "cite": norm_cite(cite), "source_type": source_type, "url": url, "tier": tier,
     }
 
 
@@ -112,7 +123,9 @@ def short_title(raw: str | None) -> str:
     1차에는 55자에서 그냥 잘랐는데 끝에 공백이 남아 원장의 꼬리표와 보고서의
     꼬리표가 한 글자 어긋났다. 검증기가 멀쩡한 인용을 지어낸 것으로 판정했다.
     """
-    t = " ".join((raw or "제목 없음").split())
+    # 세로줄을 지운다. 웹 제목에 흔히 들어가는데(예: "제목 | 사이트명")
+    # 표 안의 꼬리표에 그대로 들어가면 마크다운이 칸 구분자로 읽어 표가 깨진다.
+    t = " ".join((raw or "제목 없음").replace("|", "/").split())
     if len(t) <= 55:
         return t
     cut = t[:55]
@@ -357,11 +370,11 @@ def attach_reference(md: str, s: EvalState) -> str:
     """
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
 
-    tags = {t.strip() for t in CITE.findall(body)}
+    tags = {norm_cite(t) for t in CITE.findall(body)}
     url_by_title = {}
     for e in s.get("evidence", []):
         if e["source_type"] == "web" and e.get("url"):
-            url_by_title.setdefault(e["cite"].strip(), e["url"])
+            url_by_title.setdefault(norm_cite(e["cite"]), e["url"])
 
     papers, webs = [], []
     for doc_id, meta in POOL_META.items():
@@ -411,9 +424,9 @@ def verify(s: EvalState) -> dict:
     #    양쪽 다 공백을 털고 비교한다. 예전 절단 방식이 꼬리표 끝에 공백을
     #    남겨, 보고서가 공백 없이 옮겨 적으면 멀쩡한 인용이 지어낸 것으로
     #    판정되던 일이 있었다.
-    known = {e["cite"].strip() for e in s.get("evidence", [])}
+    known = {norm_cite(e["cite"]) for e in s.get("evidence", [])}
     bad_tags = []
-    for t in {x.strip() for x in CITE.findall(body)}:
+    for t in {norm_cite(x) for x in CITE.findall(body)}:
         if t in known:
             continue
         if re.match(r"^(MLA|ITME)\s+p\.\d+$", t) or t.startswith("웹:"):
@@ -433,13 +446,13 @@ def verify(s: EvalState) -> dict:
     # 꼬리표가 가리키는 근거 안에 그 수치와 고유 표기가 있는지 확인한다.
     by_cite: dict[str, str] = {}
     for e in s.get("evidence", []):
-        c = e["cite"].strip()
+        c = norm_cite(e["cite"])
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
     # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙어 버린다. 아스키로 제한한다.
     TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
     mismatched = []
     for unit in re.split(r"(?<=[.。])\s+|\n|\|", body):
-        tags = [t.strip() for t in CITE.findall(unit)]
+        tags = [norm_cite(t) for t in CITE.findall(unit)]
         pool_tags = [t for t in tags if re.match(r"^(MLA|ITME)\s+p\.\d+$", t)]
         if not pool_tags:
             continue

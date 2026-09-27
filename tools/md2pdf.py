@@ -34,6 +34,8 @@ table { width: 100%; border-collapse: collapse; margin: 10px 0 14px;
 th, td { border: 1px solid #c8ccd6; padding: 5px 7px; vertical-align: top;
          text-align: left; }
 th { background: #eef0f5; font-weight: 600; }
+td:first-child, th:first-child { white-space: nowrap; width: 1%; }
+table { table-layout: auto; }
 tr:nth-child(even) td { background: #fafbfd; }
 code { font-family: "SF Mono", Menlo, monospace; font-size: 9pt;
        background: #f1f2f6; padding: 1px 4px; border-radius: 3px; }

@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.nodes import CITE, attach_reference, verify  # noqa: E402
+from agents.nodes import CITE, attach_reference, norm_cite, verify  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙는다. 아스키로 제한한다.
@@ -45,16 +45,34 @@ def norm(tok: str) -> str:
     return re.sub(r"\s+", "", tok).lower().rstrip("%배×")
 
 
+def strip_pipes_in_tags(body: str) -> str:
+    """꼬리표 안의 세로줄을 지운다.
+
+    웹 제목에 "제목 | 사이트명" 형태가 흔한데, 표 안의 꼬리표에 그대로
+    들어가면 마크다운이 칸 구분자로 읽어 표가 한 칸 밀린다. PDF에서
+    기준 열이 세로로 찌그러지는 원인이었다.
+    """
+    def fix(m):
+        inner = m.group(1)
+        return f"[{inner.replace('|', '/')}]" if "|" in inner else m.group(0)
+    n = len(CITE.findall(body))
+    out = CITE.sub(fix, body)
+    fixed = sum(1 for a, b in zip(CITE.findall(body), CITE.findall(out)) if a != b)
+    if fixed:
+        log.append(f"꼬리표 세로줄 제거: {fixed}곳 (표 칸이 밀리는 것을 막는다)")
+    return out
+
+
 def repair_tags(body: str, known: set[str]) -> str:
     """잘린 꼬리표를 원장의 온전한 표기로 되돌린다."""
     def fix(m: re.Match) -> str:
-        tag = m.group(1).strip()
+        tag = norm_cite(m.group(1))
         if tag in known:
             return m.group(0)
         if not tag.startswith("웹:"):
             return m.group(0)
-        cands = {k.strip() for k in known if k.startswith("웹:") and
-                 (k.strip().startswith(tag) or tag.startswith(k.strip()))}
+        cands = {norm_cite(k) for k in known if k.startswith("웹:") and
+                 (norm_cite(k).startswith(tag) or tag.startswith(norm_cite(k)))}
         if len(cands) == 1:
             full = cands.pop()
             if full != tag:
@@ -126,7 +144,7 @@ def undo_unit_conversion(body: str, by_cite: dict[str, str]) -> str:
 
 
 def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
-    tags = [t.strip() for t in CITE.findall(unit)]
+    tags = [norm_cite(t) for t in CITE.findall(unit)]
     pool_tags = [t for t in tags if POOL_TAG.match(t)]
     if not pool_tags:
         return unit
@@ -180,13 +198,14 @@ def main() -> None:
     for p in before["problems"]:
         print("   -", p[:150])
 
-    known = {e["cite"].strip() for e in state.get("evidence", [])}
+    known = {norm_cite(e["cite"]) for e in state.get("evidence", [])}
     by_cite: dict[str, str] = {}
     for e in state.get("evidence", []):
-        c = e["cite"].strip()
+        c = norm_cite(e["cite"])
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
 
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
+    body = strip_pipes_in_tags(body)
     body = repair_tags(body, known)
     body = fix_years(body)
     body = undo_unit_conversion(body, by_cite)

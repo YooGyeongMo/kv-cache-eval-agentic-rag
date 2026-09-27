@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.nodes import short_title, source_tier, verify  # noqa: E402
+from agents.nodes import norm_cite, short_title, source_tier, verify  # noqa: E402
 
 SKELETON = """# SUMMARY
 요약이다.
@@ -206,3 +206,9 @@ def test_꼬리표_공백_차이를_오탐하지_않는다():
            "url": "https://example.com", "full": "market reaches 1.3 billion"}]
     body = "시장이 1.3 billion 달러다[웹: CXL Memory Expansion Market Research Report]. " * 6
     assert not has(run(body, ev), "근거 원장에 없는 인용 꼬리표")
+
+
+def test_꼬리표의_세로줄이_표를_깨지_않는다():
+    """웹 제목의 '제목 | 사이트명'이 마크다운 표의 칸 구분자로 읽히던 문제."""
+    assert "|" not in short_title("LLM Cost Optimization Market Size | CAGR of 26%")
+    assert norm_cite("웹: A | B") == norm_cite("웹: A / B")
