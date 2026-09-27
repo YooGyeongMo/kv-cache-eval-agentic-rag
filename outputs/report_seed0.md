@@ -69,13 +69,13 @@ ITME는 시장성 관점에서 기존 소프트웨어 스택과의 호환성과 
 
 **웹 자료**
 
-- CXL Memory Expansion Market Research Report 2034. https://marketintelo.com/report/cxl-memory-expansion-market (접속 확인 실패, 2026-09-27 기준)
-- DualPath: Breaking the Storage Bandwidth Bottleneck in. https://arxiv.org/html/2602.21548v1
-- Enabling DeepSeek's Multi-Head Latent Attention in Any. https://arxiv.org/html/2502.14837v1
-- LLM Cost Optimization Market Size / CAGR of 26%. https://market.us/report/llm-cost-optimization-market
-- LLM Inference Kernels for vLLM and SGLang (2026 Guide). https://www.spheron.network/blog/deploy-flashinfer-gpu-cloud-llm-inference-kernels
-- MLA (Multi-head Latent Attention) - mistral.rs Document. https://ericlbuehler.github.io/mistral.rs/MLA.html (접속 확인 실패, 2026-09-27 기준)
-- Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV. https://www.spheron.network/blog/multi-head-latent-attention-mla-gpu-cloud
-- Predictive Multi-Tier Memory Management for KV Cache in. https://arxiv.org/html/2604.26968v2
-- The complete DeepSeek model guide / Guides. https://www.baseten.co/resources/guide/the-complete-deepseek-model-guide
-- Using CXL Fabric-Attached Memory to Enable Shared KV ... https://www.snia.org/sniadeveloper/session/19665 (접속 확인 실패, 2026-09-27 기준)
+- Market Intelo(작성일 미상). *CXL Memory Expansion Market Research Report 2034*. marketintelo.com, https://marketintelo.com/report/cxl-memory-expansion-market (접속 확인 실패, 2026-09-27 기준)
+- arXiv(작성일 미상). *DualPath: Breaking the Storage Bandwidth Bottleneck in*. arxiv.org, https://arxiv.org/html/2602.21548v1
+- arXiv(작성일 미상). *Enabling DeepSeek's Multi-Head Latent Attention in Any*. arxiv.org, https://arxiv.org/html/2502.14837v1
+- Market.us(작성일 미상). *LLM Cost Optimization Market Size / CAGR of 26%*. market.us, https://market.us/report/llm-cost-optimization-market
+- Spheron Network(작성일 미상). *LLM Inference Kernels for vLLM and SGLang (2026 Guide)*. spheron.network, https://www.spheron.network/blog/deploy-flashinfer-gpu-cloud-llm-inference-kernels
+- Ericlbuehler(작성일 미상). *MLA (Multi-head Latent Attention) - mistral.rs Document*. ericlbuehler.github.io, https://ericlbuehler.github.io/mistral.rs/MLA.html (접속 확인 실패, 2026-09-27 기준)
+- Spheron Network(작성일 미상). *Multi-Head Latent Attention (MLA) on GPU Cloud: Cut KV*. spheron.network, https://www.spheron.network/blog/multi-head-latent-attention-mla-gpu-cloud
+- arXiv(작성일 미상). *Predictive Multi-Tier Memory Management for KV Cache in*. arxiv.org, https://arxiv.org/html/2604.26968v2
+- Baseten(작성일 미상). *The complete DeepSeek model guide / Guides*. baseten.co, https://www.baseten.co/resources/guide/the-complete-deepseek-model-guide
+- SNIA(작성일 미상). *Using CXL Fabric-Attached Memory to Enable Shared KV ..*. snia.org, https://www.snia.org/sniadeveloper/session/19665 (접속 확인 실패, 2026-09-27 기준)
