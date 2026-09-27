@@ -61,7 +61,7 @@
 - Framework : LangGraph 1.0
 - LLM/Generator : gpt-4.1-mini
 - LLM/Judge : gpt-4.1 (종합, 보고서 생성)
-- Retrieval : 자체 하이브리드 검색기 (조밀 코사인 + BM25, RRF 융합) — 지표는 아래 표
+- Retrieval : 자체 하이브리드 검색기(조밀 코사인 + BM25, RRF 융합) - Hit Rate@5 0.95, MRR 0.930
 - Embedding : **BAAI/bge-m3** (오픈소스)
 
 ### 임베딩 모델 선정 근거
@@ -125,8 +125,9 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 
 ```
 ├── data/
-│   ├── papers/            # Doc Pool 원문 PDF
-│   └── pool.json          # 문서 풀 정의. 200쪽 제한을 실행 시 검사
+│   ├── papers/            # Doc Pool 원문 PDF (저장소 미포함)
+│   ├── fetch_papers.py    # arXiv에서 논문 내려받기
+│   └── pool.json          # 문서 풀 정의와 서지 정보. 200쪽 제한을 실행 시 검사
 ├── agents/
 │   ├── retrieve_loop.py   # Agentic RAG 검색 서브그래프
 │   ├── queries.py         # 대칭 질의 템플릿
@@ -149,6 +150,8 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 │   └── qa.py              # 제출 전 최종 점검 12항목
 ├── outputs/               # 보고서와 실행 State
 ├── config.py              # 평가 대상, 관점별 기준, 편향 방지 장치
+├── prompts.py             # 프롬프트 템플릿과 공통 규칙
+├── llm.py                 # LLM 호출, 구조화 출력, 사용량 집계
 ├── state.py               # State 스키마
 ├── graph.py               # 그래프 조립
 └── app.py                 # 실행 스크립트
@@ -160,7 +163,8 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 uv sync --python 3.11
 cp .env.example .env          # OPENAI_API_KEY, TAVILY_API_KEY 입력
 
-python data/fetch_papers.py   # Doc Pool 논문 내려받기 (저장소에 PDF를 넣지 않음)
+python data/fetch_papers.py        # 문서 풀 논문 2편 (평가 실행에 필요한 최소)
+python data/fetch_papers.py --all  # 로더 비교 실측용 Doc Pool 후보 6편 전부
 
 python app.py final           # 색인부터 제출 PDF까지 한 번에
 
@@ -198,6 +202,8 @@ pytest tests/                 # 검증기와 그래프 구조 테스트 (API 키
 | 정식 명칭 고정 | ITME를 `Inter-Tier Memory Expansion`으로 지어냄 |
 | 기법과 모델 분리 | DeepSeek-V2 **모델**의 규모를 MLA **기법**의 요구 사항으로 적음 |
 | 공개 연도 대조 | 두 기술의 공개 연도를 뒤바꿔 적음 (MLA 2026, ITME 2024) |
+| **단위까지 대조** | `64배`에 `[MLA p.6]`을 달았는데 그 쪽엔 `64`가 차원 값으로만 있었음. 숫자만 맞으면 통과하던 것을 단위 문맥까지 봄 |
+| 선정 사유 고정 | 기술 선정 사유를 프롬프트에 안 줘서 LLM이 임베딩 선정 이야기를 지어냄. 사람이 쓴 사유를 `config`에서 그대로 주입 |
 | 쪽수 제한 | 문서 풀 200쪽, 보고서 10쪽 |
 
 검증기가 잡은 것 중 규칙이 분명한 것은 `tools/repair.py`가 LLM 없이 정정함.

@@ -31,7 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.nodes import CITE, attach_reference, norm_cite, verify  # noqa: E402
+from agents.nodes import (CITE, attach_reference, backed_by,  # noqa: E402
+                          norm_cite, selection_note, verify)
 
 ROOT = Path(__file__).resolve().parent.parent
 # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙는다. 아스키로 제한한다.
@@ -94,6 +95,39 @@ def repoint_and_drop(body: str, by_cite: dict[str, str]) -> str:
                    for i, p in enumerate(parts))
 
 
+def rewrite_selection(body: str) -> str:
+    """2장 기술 선정을 사람이 쓴 사유로 갈아 끼운다.
+
+    과제는 기술 선정을 2안(사람이 직접)으로 하라고 했다. 그러므로 선정 사유는
+    생성할 것이 아니라 옮겨 적을 것이다. 3차 보고서는 이 재료를 프롬프트로
+    받지 못해 "질의-정답 쌍을 기준으로 임베딩 후보를 평가하여 선정했다"고
+    적었다. 기술 선정과 임베딩 선정을 뒤섞은 문장이다.
+    """
+    m = re.search(r"(##\s*2\.\s*기술 선정\s*\n)(.*?)(?=\n##\s)", body, re.S)
+    if not m:
+        return body
+    note = selection_note()
+    lines = [l for l in note.split("\n") if l.strip()]
+    body_text = [
+        "기술 선정은 2안으로 했다. 에이전트가 고르는 방식은 쓰지 않고 사람이 "
+        "문서 풀에서 진영별로 하나씩 직접 골랐다.",
+        lines[1].replace("공통 선정 기준: ", "두 기술을 고른 공통 기준은 "),
+    ]
+    # 이름 뒤에 조사를 붙이면 받침에 따라 틀린다. "의 경우"로 통일한다.
+    for l in lines[2:]:
+        if l.startswith("같은 Doc Pool"):
+            body_text.append("같은 문서 풀에서 뺀 후보와 그 이유는 다음과 같다.")
+        elif l.startswith("  "):
+            name, why = l.strip().split(":", 1)
+            body_text.append(f"{name}의 경우 {why.strip()}")
+        else:
+            body_text.append(l)
+    new = m.group(1) + "\n" + "\n\n".join(body_text) + "\n\n"
+    log.append("2장 기술 선정을 사람이 쓴 선정 사유로 교체 "
+               "(직전 원고는 임베딩 선정과 뒤섞여 있었다)")
+    return body[:m.start()] + new + body[m.end():]
+
+
 BILLION = re.compile(r"(\d[\d,.]*)\s*억\s*달러")
 
 
@@ -149,10 +183,11 @@ def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
     if not pool_tags:
         return unit
 
-    backing = norm(" ".join(by_cite.get(t, "") for t in pool_tags))
+    # 판정은 검증기와 같은 함수를 쓴다. 따로 두었더니 검증기가 잡는 것을
+    # 정정기가 못 보는 일이 생겼다.
+    backing = " ".join(by_cite.get(t, "") for t in pool_tags)
     plain = CITE.sub("", unit)
-    bad = [tok for tok in set(TOKEN.findall(plain))
-           if len(norm(tok)) >= 3 and norm(tok) not in backing]
+    bad = [tok for tok in set(TOKEN.findall(plain)) if not backed_by(tok, backing)]
     if not bad:
         return unit
 
@@ -163,7 +198,7 @@ def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
     for tok in bad:
         owners = sorted(
             (c for c in by_cite
-             if c.startswith(doc + " p.") and norm(tok) in norm(by_cite[c])),
+             if c.startswith(doc + " p.") and backed_by(tok, by_cite[c])),
             key=lambda c: int(c.split("p.")[1]))
         if owners:
             if owners[0] not in tags and owners[0] not in added:
@@ -173,6 +208,15 @@ def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
             still_bad.append(tok)
 
     if still_bad:
+        web_tags = [t for t in tags if t.startswith("웹:")]
+        if web_tags:
+            # 같은 칸에 웹 출처가 있으면 그 주장은 웹에서 온 것이다.
+            # 문장을 지우는 대신 받치지 못하는 논문 꼬리표만 뗀다.
+            for t in pool_tags:
+                unit = unit.replace(f"[{t}]", "")
+            log.append(f"잘못 붙은 논문 꼬리표 제거: {', '.join(pool_tags)} "
+                       f"({', '.join(sorted(still_bad))}는 웹 출처의 주장이다)")
+            return re.sub(r"\s{2,}", " ", unit)
         log.append(f"근거 없음으로 내림: {', '.join(sorted(still_bad))} "
                    f"(꼬리표 {', '.join(pool_tags)}) — 문서 풀 어디에도 없음")
         return " 근거 없음 " if unit.startswith(" ") or unit.endswith(" ") else "근거 없음"
@@ -205,6 +249,7 @@ def main() -> None:
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
 
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
+    body = rewrite_selection(body)
     body = strip_pipes_in_tags(body)
     body = repair_tags(body, known)
     body = fix_years(body)

@@ -137,3 +137,40 @@ def test_두_기술에_같은_질의_템플릿을_쓴다():
 def test_대조_도메인에_영문_대응이_있다():
     for d in config.CONTRAST_DOMAINS:
         assert d in Q.DOMAIN_EN, f"웹 검색용 영문 표현이 없다: {d}"
+
+
+# ---------------------------------------------------------------- 문서와 실물의 일치
+def test_README_디렉터리_구조가_실물과_맞는가():
+    """구조도가 실물과 어긋나면 채점자가 코드를 못 찾는다."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    block = re.search(r"## Directory Structure\n+```\n(.*?)```",
+                      (root / "README.md").read_text(encoding="utf-8"), re.S).group(1)
+    cur, missing = [], []
+    for line in block.split("\n"):
+        if not line.strip():
+            continue
+        depth = len(re.match(r"^[│\s]*", line).group(0)) // 4
+        name = re.sub(r"^[│├└─\s]+", "", line).split("#")[0].strip()
+        if not name:
+            continue
+        cur = cur[:depth] + [name.rstrip("/")]
+        if not (root / "/".join(cur)).exists():
+            missing.append("/".join(cur))
+    assert not missing, f"구조도에 적혔으나 없는 경로: {missing}"
+
+
+def test_README가_평가항목의_필수_절을_갖추었는가():
+    from pathlib import Path
+    t = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+    for s in ("# Subject", "## Overview", "## Selected Technologies", "## Features",
+              "## Tech Stack", "## Agents", "## Architecture",
+              "## Directory Structure", "## Usage", "## Contributors"):
+        assert s in t, f"README에 '{s}' 절이 없다"
+    for k in ("Framework", "LLM/Generator", "LLM/Judge", "Retrieval", "Embedding",
+              "Hit Rate@", "MRR"):
+        assert k in t, f"Tech Stack에 '{k}'가 없다"
+    # 과제가 Contributors에서 PM, PL 역할을 빼라고 했다
+    contrib = t.split("## Contributors")[-1]
+    assert "PM" not in contrib and "PL" not in contrib

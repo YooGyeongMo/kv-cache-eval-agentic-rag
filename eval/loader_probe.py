@@ -32,8 +32,15 @@ def col_break_rate(t):
     return bad / len(lines)
 
 if __name__ == "__main__":
+    import os
+    ALL = ["2402.02750", "2405.04434", "2406.19707",
+           "2504.19874", "2511.00321", "2606.12556"]
+    have = [a for a in ALL if os.path.exists(f"data/papers/{a}.pdf")]
+    if len(have) < len(ALL):
+        print("없는 논문은 건너뛴다. 전부 받으려면 "
+              "python data/fetch_papers.py --all\n")
     print(f"{'paper':<14}{'loader':<18}{'chars':>9}{'고아숫자':>9}{'열끊김':>9}")
-    for aid in ["2402.02750", "2405.04434", "2406.19707", "2504.19874", "2511.00321", "2606.12556"]:
+    for aid in have:
         path = f"data/papers/{aid}.pdf"
         for name, fn in [("pymupdf", lambda p: mupdf(p, False)),
                          ("pymupdf(sort)", lambda p: mupdf(p, True)),
