@@ -147,6 +147,9 @@ def test_README_디렉터리_구조가_실물과_맞는가():
     root = Path(__file__).resolve().parent.parent
     block = re.search(r"## Directory Structure\n+```\n(.*?)```",
                       (root / "README.md").read_text(encoding="utf-8"), re.S).group(1)
+    # 저장소에 담기지 않는 경로. 논문은 저작권 때문에 빼고 fetch_papers.py로
+    # 받으며, 산출물은 실행해야 생긴다. 새로 받은 저장소에는 없는 것이 맞다.
+    GENERATED = {"data/papers", "outputs", "index"}
     cur, missing = [], []
     for line in block.split("\n"):
         if not line.strip():
@@ -156,8 +159,9 @@ def test_README_디렉터리_구조가_실물과_맞는가():
         if not name:
             continue
         cur = cur[:depth] + [name.rstrip("/")]
-        if not (root / "/".join(cur)).exists():
-            missing.append("/".join(cur))
+        path = "/".join(cur)
+        if path not in GENERATED and not (root / path).exists():
+            missing.append(path)
     assert not missing, f"구조도에 적혔으나 없는 경로: {missing}"
 
 
