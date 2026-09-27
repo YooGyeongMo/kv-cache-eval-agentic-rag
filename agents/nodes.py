@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 
 import config
@@ -34,25 +35,99 @@ POOL_META = {d["doc_id"]: d for d in
 
 CITE = re.compile(r"\[([^\[\]]{2,160}?)\]")
 
+# 웹 근거의 출처 등급. 시장 평가에서 상업 조사기관 요약과 논문을 같은 무게로
+# 쓰면 평가가 부풀려진다. 등급을 근거에 붙여 두고 보고서가 구별해 쓰게 한다.
+PRIMARY_HOSTS = (
+    "arxiv.org", "github.com", "openreview.net", "usenix.org", "acm.org",
+    "ieee.org", "nvidia.com", "docs.vllm.ai", "vllm.ai", "huggingface.co",
+    "skhynix.com", "samsung.com", "micron.com", "intel.com", "amd.com",
+    "computeexpresslink.org", "marvell.com", "pytorch.org", "docs.sglang.ai",
+)
+MARKET_RESEARCH_HOSTS = (
+    "marketintelo.com", "market.us", "mordorintelligence.com", "gminsights.com",
+    "fortunebusinessinsights.com", "researchandmarkets.com", "marketsandmarkets.com",
+    "grandviewresearch.com", "statista.com", "precedenceresearch.com",
+    "alliedmarketresearch.com", "globenewswire.com",
+)
+
+
+def probe_urls(urls: list[str], timeout: int = 12) -> dict[str, bool]:
+    """REFERENCE에 올릴 URL이 실제로 응답하는지 확인한다.
+
+    검색 도구가 색인만 남고 사라진 쪽을 돌려주는 경우가 있다. 3차 점검에서
+    참고문헌 9건 중 3건이 404와 403이었다. 죽은 링크를 말없이 목록에 올리면
+    확인한 척이 되므로, 확인 실패를 명시한다. 링크를 지우지는 않는다.
+    본문이 이미 그 꼬리표로 인용하고 있어 지우면 짝이 어긋난다.
+    """
+    import urllib.request
+    from concurrent.futures import ThreadPoolExecutor
+
+    ua = {"User-Agent": "Mozilla/5.0 (reference link check)"}
+
+    def one(u: str) -> tuple[str, bool]:
+        for method in ("HEAD", "GET"):
+            try:
+                req = urllib.request.Request(u, headers=ua, method=method)
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return u, 200 <= r.status < 400
+            except Exception as e:
+                if getattr(e, "code", None) not in (405, None):
+                    return u, False
+        return u, False
+
+    if not urls:
+        return {}
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            return dict(ex.map(one, urls))
+    except Exception:
+        return {u: True for u in urls}      # 확인 자체가 막히면 판단하지 않는다
+
+
+def source_tier(url: str) -> str:
+    """일차 자료, 시장조사 요약, 기타 이차 자료로 가른다."""
+    host = re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0].lower()
+    if any(host == h or host.endswith("." + h) for h in PRIMARY_HOSTS):
+        return "일차"
+    if any(host == h or host.endswith("." + h) for h in MARKET_RESEARCH_HOSTS):
+        return "시장조사"
+    return "이차"
+
 
 # ---------------------------------------------------------------- 근거 원장
 def _mk(tech: str, perspective: str, stance: str, full: str, cite: str,
-        source_type: str, url: str = "") -> dict:
+        source_type: str, url: str = "", tier: str = "문서") -> dict:
     return {
         "id": f"E{abs(hash((tech, perspective, cite, full[:120]))) % 1000000:06d}",
         "tech": tech, "perspective": perspective, "stance": stance,
         "claim": " ".join(full.split())[:400],     # 프롬프트와 화면 표시용
         "full": " ".join(full.split()),            # 수치 대조용. 자르지 않는다
-        "cite": cite, "source_type": source_type, "url": url,
+        "cite": cite, "source_type": source_type, "url": url, "tier": tier,
     }
 
 
+def short_title(raw: str | None) -> str:
+    """꼬리표에 쓸 제목. 단어 경계에서 자르고 끝 공백을 없앤다.
+
+    1차에는 55자에서 그냥 잘랐는데 끝에 공백이 남아 원장의 꼬리표와 보고서의
+    꼬리표가 한 글자 어긋났다. 검증기가 멀쩡한 인용을 지어낸 것으로 판정했다.
+    """
+    t = " ".join((raw or "제목 없음").split())
+    if len(t) <= 55:
+        return t
+    cut = t[:55]
+    if " " in cut:
+        cut = cut[:cut.rindex(" ")]
+    return cut.rstrip(" ,:;-")
+
+
 def _web_context(items: list[dict]) -> str:
-    """웹 결과를 근거 블록으로 만든다. 쪽수를 붙이지 않는다."""
+    """웹 결과를 근거 블록으로 만든다. 쪽수를 붙이지 않고 출처 등급을 적는다."""
     out = []
     for it in items:
-        title = " ".join((it.get("title") or "제목 없음").split())[:55]
-        out.append(f"[웹: {title}]\n{(it.get('content') or '').strip()}")
+        out.append(f"[웹: {short_title(it.get('title'))}] "
+                   f"(출처 등급: {source_tier(it.get('url', ''))})\n"
+                   f"{(it.get('content') or '').strip()}")
     return "\n\n---\n\n".join(out)
 
 
@@ -61,9 +136,9 @@ def _harvest(res: dict, tech: str, perspective: str, stance: str) -> list[dict]:
     for h in res.get("hits", [])[:4]:
         ev.append(_mk(tech, perspective, stance, h.chunk.text, h.chunk.cite, "pool"))
     for w in res.get("web", [])[:4]:
-        title = " ".join((w.get("title") or "제목 없음").split())[:55]
         ev.append(_mk(tech, perspective, stance, w.get("content") or "",
-                      f"웹: {title}", "web", w.get("url", "")))
+                      f"웹: {short_title(w.get('title'))}", "web", w.get("url", ""),
+                      source_tier(w.get("url", ""))))
     return ev
 
 
@@ -177,6 +252,9 @@ def audit(s: EvalState) -> dict:
             "evidence_con": sum(1 for e in ev if e["stance"] == "con"),
             "evidence_pool": sum(1 for e in ev if e["source_type"] == "pool"),
             "evidence_web": sum(1 for e in ev if e["source_type"] == "web"),
+            "web_일차": sum(1 for e in ev if e.get("tier") == "일차"),
+            "web_이차": sum(1 for e in ev if e.get("tier") == "이차"),
+            "web_시장조사": sum(1 for e in ev if e.get("tier") == "시장조사"),
         }
         for k, label in (("market", "시장성"), ("domain_fit", "도메인")):
             v = s.get(k, {}).get(tid, {})
@@ -238,7 +316,7 @@ def _dump_list(items: list) -> str:
 
 
 # ---------------------------------------------------------------- 6. 보고서
-def make_report(setup_note: str, limits_fn):
+def make_report(setup_note: str, limits_fn, extra_numbers: str = ""):
     """limits_fn은 State를 받아 한계 장의 재료를 만든다.
 
     한계 장에는 감사 결과가 들어가야 하는데 감사는 보고서보다 앞 단계라서
@@ -265,7 +343,8 @@ def make_report(setup_note: str, limits_fn):
                 setup=setup_note, limits=limits_fn(s)) + fix,
             model=config.JUDGE, temperature=0.2)
         return {"report_md": attach_reference(md, s),
-                "n_report": s.get("n_report", 0) + 1}
+                "n_report": s.get("n_report", 0) + 1,
+                "extra_numbers": extra_numbers}
 
     return report
 
@@ -290,9 +369,17 @@ def attach_reference(md: str, s: EvalState) -> str:
             papers.append(
                 f"- {meta['authors']}({meta['year']}). {meta['title']}. "
                 f"*{meta['venue']}*, {meta['arxiv']}. {meta['url']}")
+
+    cited_urls = [url_by_title[t] for t in sorted(tags)
+                  if t.startswith("웹:") and t in url_by_title]
+    alive = probe_urls(cited_urls)
+    today = date.today().isoformat()
     for t in sorted(tags):
-        if t.startswith("웹:") and t in url_by_title:
-            webs.append(f"- {t[2:].strip()}. {url_by_title[t]}")
+        if not (t.startswith("웹:") and t in url_by_title):
+            continue
+        u = url_by_title[t]
+        mark = "" if alive.get(u, True) else f" (접속 확인 실패, {today} 기준)"
+        webs.append(f"- {t[2:].strip()}. {u}{mark}")
 
     lines = ["", "## REFERENCE", "",
              "본문에 인용 꼬리표로 실제 사용한 자료만 적는다. 목록은 근거 원장에서 자동으로 뽑았다.", ""]
@@ -335,8 +422,46 @@ def verify(s: EvalState) -> dict:
                         + ", ".join(sorted(bad_tags)[:8])
                         + ". 주어진 근거의 꼬리표를 그대로 써야 한다.")
 
+    # 2-1) 꼬리표가 그 문장을 실제로 받치는지 본다.
+    #
+    # 꼬리표가 원장에 존재하기만 하면 통과하던 것이 빈틈이었다. 3차 실행에서
+    # 웹에서 본 주장(Llama2-7B에서 3퍼센트 손실)에 논문 꼬리표 [MLA p.6]을
+    # 붙였는데, 그 쪽은 어텐션 구조 설명이라 해당 내용이 없었다. 문장 단위로
+    # 꼬리표가 가리키는 근거 안에 그 수치와 고유 표기가 있는지 확인한다.
+    by_cite: dict[str, str] = {}
+    for e in s.get("evidence", []):
+        by_cite[e["cite"]] = by_cite.get(e["cite"], "") + " " + e.get("full", "")
+    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[\w.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
+    mismatched = []
+    for unit in re.split(r"(?<=[.。])\s+|\n|\|", body):
+        tags = [t.strip() for t in CITE.findall(unit)]
+        pool_tags = [t for t in tags if re.match(r"^(MLA|ITME)\s+p\.\d+$", t)]
+        if not pool_tags:
+            continue
+        backing = " ".join(by_cite.get(t, "") for t in pool_tags).lower()
+        if not backing:
+            continue
+        plain = CITE.sub("", unit)
+        for tok in set(TOKEN.findall(plain)):
+            probe = re.sub(r"\s+", "", tok).lower().rstrip("%배×")
+            if len(probe) < 3 or probe in backing.replace(" ", ""):
+                continue
+            mismatched.append(f"'{tok}' (꼬리표 {', '.join(pool_tags)})")
+    if mismatched:
+        problems.append(
+            "꼬리표가 가리키는 쪽에 없는 표기를 그 꼬리표로 인용했다: "
+            + ", ".join(sorted(set(mismatched))[:8])
+            + ". 그 내용이 실제로 나온 근거의 꼬리표를 달거나 문장을 뺀다.")
+
+    # 2-2) 단위를 바꿔 적었는지. 원문이 billion이면 억으로 고치지 않는다.
+    for m in re.finditer(r"\d[\d,.]*\s*(억|만)\s*달러", body):
+        problems.append(f"시장 수치의 단위를 바꿔 적었다: {m.group(0)}. "
+                        f"근거의 원 표기를 그대로 옮긴다.")
+
     # 3) 수치 대조. 근거 원문에 없는 숫자는 만들어 낸 숫자다.
-    corpus = " ".join(e.get("full", e.get("claim", "")) for e in s.get("evidence", []))
+    # 검색 설정 표의 수치(임베딩 실측값)도 보고서가 인용할 수 있으므로 함께 센다.
+    corpus = (" ".join(e.get("full", e.get("claim", "")) for e in s.get("evidence", []))
+              + " " + s.get("extra_numbers", ""))
     corpus_nums = set(re.findall(r"\d+(?:[.,]\d+)?", corpus))
     text = re.sub(r"^#.*$", "", body, flags=re.M)
     text = re.sub(r"\[[^\]]*\]", "", text)                  # 꼬리표의 쪽수는 뺀다

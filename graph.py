@@ -27,13 +27,13 @@ from state import EvalState
 MAX_RECOLLECT = 1
 
 
-def build(retriever, web_search, setup_note: str, limits_note: str):
+def build(retriever, web_search, setup_note: str, limits_fn):
     sub = make_subgraph(retriever, web_search)
 
     survey = nodes.make_survey(sub)
     market = nodes.make_perspective(sub, "market")
     domain = nodes.make_perspective(sub, "domain")
-    report = nodes.make_report(setup_note, limits_note)
+    report = nodes.make_report(setup_note, limits_fn, extra_numbers=setup_note)
 
     def prepare(s: EvalState) -> dict:
         techs = list(s["techs"])

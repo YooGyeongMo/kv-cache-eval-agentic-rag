@@ -96,3 +96,4 @@ class EvalState(TypedDict, total=False):
     report_md: str
     verify: dict
     n_report: int
+    extra_numbers: str

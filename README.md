@@ -155,16 +155,46 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 uv sync --python 3.11
 cp .env.example .env          # OPENAI_API_KEY, TAVILY_API_KEY 입력
 
+python data/fetch_papers.py   # Doc Pool 논문 내려받기 (저장소에 PDF를 넣지 않음)
+
+python app.py final           # 색인부터 제출 PDF까지 한 번에
+
+# 또는 단계별로
 python app.py index           # 문서 풀 색인. 한 번만
 python app.py run             # 평가 실행, 보고서 생성
 python app.py run --seed 1    # 기술 제시 순서를 뒤집어 재실행
 python app.py compare         # 두 실행의 결론이 갈리는지 비교
 
-python eval/embed_bench.py    # 임베딩 후보 실측 재현
+python eval/loader_probe.py   # PDF 로더 비교 실측 재현
+python eval/embed_bench.py    # 임베딩 후보 비교 실측 재현
 python tools/md2pdf.py outputs/report_seed0.md   # PDF 변환과 쪽수 검사
+python tools/qa.py            # 제출 전 최종 점검
 ```
+
+`app.py final`은 색인, 정방향 실행, 역방향 실행, 순서 효과 비교, PDF 변환,
+최종 점검을 차례로 돌리고 `outputs/RAG-Output_판교_8반_유경모.pdf`를 만듦.
+
+## Quality Gates
+
+보고서를 LLM에게 맡기고 끝내지 않음. 레드팀을 돌리며 발견한 실패 방식을 코드 검사로
+바꿔 `tools/qa.py`에 모아 둠. 실제로 잡아낸 것들임.
+
+| 검사 | 실제로 잡은 사례 |
+|---|---|
+| 참고문헌 기계 생성 | LLM이 `arXiv:2406.00000` 같은 없는 번호와 무관한 문서를 참고문헌에 올림 |
+| 꼬리표 존재 대조 | 근거 원장에 없는 인용 꼬리표를 지어냄 |
+| **꼬리표 내용 대조** | 웹에서 본 `Llama2-7B 3% 손실`에 `[MLA p.6]`을 붙임. 그 쪽은 어텐션 구조 설명이라 해당 내용이 없음 |
+| 수치 대조 | 근거 원문에 없는 숫자를 본문에 씀 |
+| 단위 변환 금지 | `1.3 billion`을 `13억 달러`로 바꿔 적어 원 표기를 가림 |
+| 우열 표현 금지 | `동등 또는 우수 보고`처럼 우열을 판정하는 서술 |
+| URL 생존 확인 | 참고문헌 9건 중 3건이 404와 403이었음 |
+| 정식 명칭 고정 | ITME를 `Inter-Tier Memory Expansion`으로 지어냄 |
+| 기법과 모델 분리 | DeepSeek-V2 **모델**의 규모를 MLA **기법**의 요구 사항으로 적음 |
+| 쪽수 제한 | 문서 풀 200쪽, 보고서 10쪽 |
 
 ## Contributors
 
-- (이름) : 전 과정 단독 수행. 기술 선정, 문서 풀 구성, RAG 파이프라인 설계 및 구현,
-  에이전트 설계 및 구현, 평가 기준 설계, 확증 편향 방지 장치 구현, 보고서 생성 및 검증
+- 유경모 (판교 8반) : 1인 과제로 전 과정 단독 수행. 기술 선정 및 선정 사유 정리, 문서 풀 구성,
+  PDF 로더 실측 비교, 오픈소스 임베딩 4종 실측 비교, 하이브리드 검색기 구현, Agentic RAG 검색
+  서브그래프 설계 및 구현, 관점별 평가 에이전트 설계 및 구현, 평가 기준 설계, 확증 편향 방지
+  장치 7종 구현, 코드 기반 보고서 검증기 구현, 보고서 생성 및 PDF 변환

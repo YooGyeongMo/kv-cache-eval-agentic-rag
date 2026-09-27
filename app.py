@@ -88,8 +88,18 @@ def limits_note(state: dict) -> str:
         "감안하고 읽어야 한다.",
         "시장 근거는 공개 자료만 썼다. 반도체 업계는 수율과 원가를 공개하지 않으므로 "
         "실제 채택 규모는 공개 정보로 확인할 수 없다.",
+        "웹 근거에 출처 등급을 붙였다. 일차는 논문과 코드 저장소와 벤더 공식 문서, "
+        "시장조사는 상업 조사기관 요약, 이차는 그 밖의 기사와 블로그다. 시장 규모 "
+        "수치는 대부분 시장조사 등급이며 원본 보고서를 열어 대조하지 못했다. 같은 "
+        "범주를 두고도 조사기관마다 수치가 크게 다른 경우가 있으므로 단일 수치를 "
+        "그대로 믿으면 안 된다.",
     ]
     audit = state.get("audit", {})
+    tiers = {t: r for t, r in (audit.get("per_tech") or {}).items()}
+    if tiers:
+        parts.append("수집된 웹 근거의 등급 분포는 다음과 같다. " + " ".join(
+            f"{t}: 일차 {r.get('web_일차', 0)}건, 이차 {r.get('web_이차', 0)}건, "
+            f"시장조사 {r.get('web_시장조사', 0)}건." for t, r in tiers.items()))
     if audit.get("flags"):
         parts.append("확증편향 감사에서 다음이 걸렸다. " + " ".join(audit["flags"]))
     else:
@@ -152,11 +162,47 @@ def cmd_compare() -> None:
     print(f"  상충 지점 수 {ca} 대 {cb}")
 
 
+def cmd_final() -> None:
+    """제출물을 처음부터 끝까지 만든다.
+
+    색인, 두 방향 실행(순서 효과 확인용), 비교, PDF 변환, 최종 점검을
+    차례로 돌린다. 어느 단계에서 막히면 거기서 멈추고 이유를 알린다.
+    """
+    import subprocess
+
+    py = sys.executable
+    sub = config.SUBMISSION
+    steps = [
+        ("문서 풀 색인", [py, "app.py", "index"]),
+        ("평가 실행 (정방향)", [py, "app.py", "run", "--seed", "0"]),
+        ("평가 실행 (역방향, 순서 효과 확인)", [py, "app.py", "run", "--seed", "1"]),
+        ("순서 효과 비교", [py, "app.py", "compare"]),
+        ("PDF 변환", [py, "tools/md2pdf.py", "outputs/report_seed0.md",
+                      f"KV cache 최적화 기술 다관점 평가 · {sub['campus']} {sub['class']} {sub['author']}"]),
+    ]
+    for label, cmd in steps:
+        print(f"\n{'=' * 70}\n{label}\n{'=' * 70}")
+        r = subprocess.run(cmd, cwd=ROOT)
+        if r.returncode != 0:
+            sys.exit(f"\n[중단] '{label}' 단계가 실패했다. 위 오류를 확인한다.")
+
+    # 제출 파일명으로 복사한다
+    src = OUT / "report_seed0.pdf"
+    dest = OUT / f"RAG-Output_{sub['campus']}_{sub['class']}_{sub['author']}.pdf"
+    if src.exists():
+        dest.write_bytes(src.read_bytes())
+        print(f"\n제출 파일 {dest}")
+
+    print(f"\n{'=' * 70}\n최종 점검\n{'=' * 70}")
+    subprocess.run([py, "tools/qa.py"], cwd=ROOT)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["index", "run", "compare"])
+    ap.add_argument("command", choices=["index", "run", "compare", "final"])
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     {"index": lambda: cmd_index(),
      "run": lambda: cmd_run(args.seed),
-     "compare": lambda: cmd_compare()}[args.command]()
+     "compare": lambda: cmd_compare(),
+     "final": lambda: cmd_final()}[args.command]()
