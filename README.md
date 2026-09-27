@@ -61,7 +61,7 @@
 - Framework : LangGraph 1.0
 - LLM/Generator : gpt-4.1-mini
 - LLM/Judge : gpt-4.1 (종합, 보고서 생성)
-- Retrieval : 자체 하이브리드 검색기 (조밀 코사인 + BM25, RRF 융합) — 지표는 아래 표
+- Retrieval : 자체 하이브리드 검색기(조밀 코사인 + BM25, RRF 융합) - Hit Rate@5 0.95, MRR 0.930
 - Embedding : **BAAI/bge-m3** (오픈소스)
 
 ### 임베딩 모델 선정 근거
@@ -125,8 +125,9 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 
 ```
 ├── data/
-│   ├── papers/            # Doc Pool 원문 PDF
-│   └── pool.json          # 문서 풀 정의. 200쪽 제한을 실행 시 검사
+│   ├── papers/            # Doc Pool 원문 PDF (저장소 미포함)
+│   ├── fetch_papers.py    # arXiv에서 논문 내려받기
+│   └── pool.json          # 문서 풀 정의와 서지 정보. 200쪽 제한을 실행 시 검사
 ├── agents/
 │   ├── retrieve_loop.py   # Agentic RAG 검색 서브그래프
 │   ├── queries.py         # 대칭 질의 템플릿
@@ -149,6 +150,8 @@ Hit@5는 상위 세 모델이 같지만, 이 파이프라인은 상위 근거 �
 │   └── qa.py              # 제출 전 최종 점검 12항목
 ├── outputs/               # 보고서와 실행 State
 ├── config.py              # 평가 대상, 관점별 기준, 편향 방지 장치
+├── prompts.py             # 프롬프트 템플릿과 공통 규칙
+├── llm.py                 # LLM 호출, 구조화 출력, 사용량 집계
 ├── state.py               # State 스키마
 ├── graph.py               # 그래프 조립
 └── app.py                 # 실행 스크립트
