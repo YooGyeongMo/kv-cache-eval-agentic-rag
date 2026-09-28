@@ -178,3 +178,40 @@ def test_README가_평가항목의_필수_절을_갖추었는가():
     # 과제가 Contributors에서 PM, PL 역할을 빼라고 했다
     contrib = t.split("## Contributors")[-1]
     assert "PM" not in contrib and "PL" not in contrib
+
+
+def test_웹_검색_캐시가_한도를_아낀다():
+    """정방향과 역방향을 함께 돌리면 같은 질의가 두 번 나간다.
+
+    프롬프트를 고쳐 재실행할 때마다 처음부터 검색하다가 무료 한도를
+    소진했고, 한도가 차자 시장성 관점이 통째로 빈 보고서가 나왔다.
+    """
+    import tempfile
+    from pathlib import Path as P
+    from rag.webcache import WebCache
+
+    with tempfile.TemporaryDirectory() as d:
+        c = WebCache(P(d) / "c.json", ttl_days=1)
+        assert c.get("질의") is None
+        c.put("질의", [{"title": "t", "url": "u", "content": "x"}])
+        assert c.get("질의")[0]["title"] == "t"
+        assert c.hit == 1 and c.miss == 1
+
+        # 빈 결과는 담지 않는다. 담으면 실패가 굳는다.
+        c.put("빈질의", [])
+        assert c.get("빈질의") is None
+
+        # 다른 실행이 같은 파일을 열면 그대로 읽힌다
+        again = WebCache(P(d) / "c.json", ttl_days=1)
+        assert again.get("질의") is not None
+
+
+def test_오래된_캐시는_다시_받는다():
+    import tempfile, time
+    from pathlib import Path as P
+    from rag.webcache import WebCache
+    with tempfile.TemporaryDirectory() as d:
+        c = WebCache(P(d) / "c.json", ttl_days=0)
+        c.put("q", [{"title": "t"}])
+        time.sleep(0.01)
+        assert c.get("q") is None, "만료된 시장 정보를 그대로 쓰면 안 된다"

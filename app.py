@@ -20,6 +20,7 @@ from graph import build
 from rag import embedder as emb
 from rag.ingest import build_pool, pool_page_count
 from rag.retriever import HybridRetriever
+from rag.webcache import WebCache
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "outputs"
@@ -54,8 +55,13 @@ def make_web_search():
     # 실제로 27분 동안 멈춰 있었다. 한 번 못 받으면 그 질의는 비우고 넘어간다.
     tool = TavilySearch(max_results=5, search_depth="advanced", timeout=30)
     stat = {"ok": 0, "empty": 0, "fail": 0}
+    cache = WebCache()
 
     def search(query: str) -> list[dict]:
+        cached = cache.get(query)
+        if cached is not None:
+            stat["ok"] += 1
+            return cached
         try:
             res = tool.invoke({"query": query})
         except Exception as e:
@@ -70,11 +76,14 @@ def make_web_search():
             stat["empty"] += 1
             print(f"  [웹 검색 결과 없음] {query[:70]}")
             _guard(stat)
-        return [{"title": i.get("title", ""), "url": i.get("url", ""),
-                 "content": i.get("content", ""),
-                 # 검색 도구가 줄 때만 있다. 없으면 참고문헌에 작성일 미상으로 적는다.
-                 "published": i.get("published_date", "") or ""} for i in items]
+        out = [{"title": i.get("title", ""), "url": i.get("url", ""),
+                "content": i.get("content", ""),
+                # 검색 도구가 줄 때만 있다. 없으면 참고문헌에 작성일 미상으로 적는다.
+                "published": i.get("published_date", "") or ""} for i in items]
+        cache.put(query, out)
+        return out
 
+    search.cache = cache
     return search
 
 
@@ -147,7 +156,8 @@ def cmd_run(seed: int) -> None:
     chunks = build_pool(spec)
     r = HybridRetriever.load(INDEX_NAME, emb.load(config.EMBEDDING))
     r.chunks = chunks
-    app = build(r, make_web_search(), setup_note(), limits_note)
+    web = make_web_search()
+    app = build(r, web, setup_note(), limits_note)
 
     init = {
         "techs": config.TECHS,
@@ -169,6 +179,7 @@ def cmd_run(seed: int) -> None:
     print(f"\n보고서 outputs/report_{tag}.md")
     print(f"LLM 호출 {llm.USAGE['calls']}회, 입력 {llm.USAGE['in']:,} 출력 {llm.USAGE['out']:,} 토큰")
     print(f"소요 {time.time() - t0:.0f}초")
+    print(f"{web.cache.summary()}")
     print(f"감사: {'통과' if state['audit']['passed'] else '지적 ' + str(len(state['audit']['flags'])) + '건'}")
     v = state.get("verify", {})
     print(f"검증: {'통과' if v.get('passed') else '지적 ' + str(len(v.get('problems', [])))+'건'}")
