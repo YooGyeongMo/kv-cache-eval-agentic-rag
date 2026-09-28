@@ -294,3 +294,60 @@ def test_웹_근거가_있으면_감사를_통과한다():
                        for t in config.TECHS},
     }
     assert audit(state)["audit"]["passed"]
+
+
+# ---------------------------------------------------------------- 레드팀 12차
+def test_대소문자가_달라도_근거로_본다():
+    """근거 쪽을 소문자로 안 맞춰서 Gen5가 논문에 있는데도 없다고 판정했다.
+
+    그 결과 멀쩡한 서술이 근거 없음으로 계속 내려갔다.
+    """
+    from agents.nodes import backed_by
+    src = "Hynix CMM and PCIe Gen5 NVMe SSDs were used for evaluation"
+    assert backed_by("Gen5", src)
+    assert backed_by("gen5", src)
+    assert not backed_by("FP4", src), "없는 표기는 여전히 걸러야 한다"
+
+
+def test_억천만_표기도_원표기로_되돌린다():
+    """165억5천만 달러처럼 억과 천만을 이어 쓴 형태를 놓쳤다."""
+    from tools.repair import undo_unit_conversion
+    by = {"x": "reaches 1.74 billion in 2026 and 16.55 billion by 2035"}
+    out = undo_unit_conversion("2026년 17억4천만 달러, 2035년 165억5천만 달러", by)
+    assert "1.74 billion" in out and "16.55 billion" in out
+    assert "억" not in out
+
+
+def test_근거에_없는_환산값은_건드리지_않는다():
+    from tools.repair import undo_unit_conversion
+    assert "99억 달러" in undo_unit_conversion("99억 달러", {"x": "no such figure"})
+
+
+def test_스크래핑이_깨뜨린_수치를_복원한다():
+    """웹 스크래핑이 소수점 뒤에서 문장을 끊어 'USD16. 55 Billion'이 된다.
+
+    이걸 55 billion으로 읽고 본문의 15.5를 14.99로 "고친" 적이 있다.
+    추측으로 숫자를 고치면 원문보다 나빠진다.
+    """
+    from tools.repair import fix_wrong_billions
+    by = {"x": "2026 MARKET SIZE USD1. 74 Billion 2035 MARKET SIZE USD16. 55 Billion"}
+    assert "16.55 billion" in fix_wrong_billions("2035년 15.5 billion", by)
+    assert "1.74 billion" in fix_wrong_billions("2026년 1.74 billion", by)
+    # 멀리 떨어진 값은 다른 지표일 수 있으므로 손대지 않는다
+    assert "900 billion" in fix_wrong_billions("무관한 900 billion", by)
+
+
+def test_한_쪽에_기준선이_여럿이면_잡지_않는다():
+    """ITME p.10은 CPU 오프로딩과 재계산을 한 문단에서 같이 다룬다.
+
+    수치 뒤쪽만 보고 판정해서 멀쩡한 서술을 기준선 오류로 몰았다.
+    """
+    ev = [{"cite": "ITME p.10", "source_type": "pool", "tier": "문서",
+           "full": "the CPU-offload baseline exhausts its memory, its caching system "
+                   "collapses forcing the hit rate to 0%, making it as slow as the "
+                   "recompute-only baseline"}]
+    body = ("| 기준 | 값 |\n"
+            "| 붕괴 | CPU-offload 베이스라인의 hit rate가 0퍼센트로 떨어진다[ITME p.10] |\n"
+            "| 기타1 | 값이다[ITME p.10] |\n| 기타2 | 값이다[ITME p.10] |\n"
+            "| 기타3 | 값이다[ITME p.10] |\n| 기타4 | 값이다[ITME p.10] |\n")
+    assert not has(run(body, ev), "비교 기준선")

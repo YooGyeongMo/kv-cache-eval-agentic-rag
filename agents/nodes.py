@@ -129,10 +129,13 @@ def site_name(url: str) -> str:
     return base.replace("-", " ").title()
 
 
+# 한국어 본문은 퍼센트를 한글로도 적는다. 단위를 못 알아보면 그 수치를
+# 아예 못 세고, 근거 없이 적힌 문단을 그냥 지나친다.
 UNIT_WORDS = {
     "배": r"(?:times|fold|×|x\b|speedup)",
     "×": r"(?:times|fold|×|x\b|speedup)",
     "%": r"(?:%|percent)",
+    "퍼센트": r"(?:%|percent)",
 }
 
 
@@ -144,10 +147,13 @@ def backed_by(token: str, backing: str) -> bool:
     없었다. 그래도 통과했다. 그래서 단위가 붙은 수치는 근거에서도 그 단위와
     가까이 있어야 받친 것으로 본다.
     """
-    flat = backing.replace(" ", "")
+    # 근거 쪽도 소문자로 맞춘다. 대소문자를 안 맞춰서 Gen5가 논문 다섯 쪽에
+    # 있는데도 없다고 판정했고, 멀쩡한 서술이 근거 없음으로 내려갔다.
+    flat = backing.replace(" ", "").lower()
     probe = re.sub(r"\s+", "", token).lower()
-    unit = next((u for u in UNIT_WORDS if probe.endswith(u)), None)
-    num = probe.rstrip("%배×") if unit else probe
+    unit = next((u for u in sorted(UNIT_WORDS, key=len, reverse=True)
+                 if probe.endswith(u)), None)
+    num = probe[: -len(unit)] if unit else probe
 
     if len(num) < 3 and not unit:
         return True                      # 두 자리 이하 맨숫자는 판단하지 않는다
@@ -193,12 +199,15 @@ def short_title(raw: str | None) -> str:
     # 세로줄을 지운다. 웹 제목에 흔히 들어가는데(예: "제목 | 사이트명")
     # 표 안의 꼬리표에 그대로 들어가면 마크다운이 칸 구분자로 읽어 표가 깨진다.
     t = " ".join((raw or "제목 없음").replace("|", "/").split())
+    # 검색 도구가 같은 문서의 제목을 말줄임표를 붙여 주기도 하고 안 붙여
+    # 주기도 한다. 그대로 두면 한 출처가 두 꼬리표로 갈린다.
+    t = re.sub(r"[\s.\u2026]+$", "", t)
     if len(t) <= 55:
         return t
     cut = t[:55]
     if " " in cut:
         cut = cut[:cut.rindex(" ")]
-    return cut.rstrip(" ,:;-")
+    return cut.rstrip(" ,:;-.\u2026")
 
 
 def _web_context(items: list[dict]) -> str:
@@ -562,7 +571,7 @@ def verify(s: EvalState) -> dict:
         c = norm_cite(e["cite"])
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
     # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙어 버린다. 아스키로 제한한다.
-    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
+    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|퍼센트|배|×)")
     mismatched = []
     for unit in re.split(r"(?<=[.。])\s+|\n|\|", body):
         tags = [norm_cite(t) for t in CITE.findall(unit)]
@@ -628,19 +637,17 @@ def verify(s: EvalState) -> dict:
         if not said:
             continue
         backing = " ".join(by_cite.get(t, "") for t in pool_tags).lower()
-        for num in nums:
-            val = re.match(r"\d+(?:\.\d+)?", num.strip()).group(0)
-            m = re.search(re.escape(val) + r".{0,220}", backing)
-            if not m:
-                continue
-            near = m.group(0)
-            actual = {k for k, words in BASELINES.items()
-                      if any(w in near for w in words)}
-            if actual and not (said & actual):
-                problems.append(
-                    f"{num}의 비교 기준선을 '{'/'.join(sorted(said))}'로 적었으나 "
-                    f"근거는 '{'/'.join(sorted(actual))}' 대비다. 기준선이 바뀌면 "
-                    f"수치의 뜻이 달라진다.")
+        # 근거 전체에 어떤 기준선이 나오는지 먼저 본다. 한 쪽에 여러 기준선이
+        # 함께 적히는 경우가 많아, 수치 뒤쪽만 보면 엉뚱한 것을 짚는다.
+        # ITME p.10은 CPU 오프로딩과 재계산을 한 문단에서 같이 다룬다.
+        present = {k for k, words in BASELINES.items()
+                   if any(w in backing for w in words)}
+        if not present or (said & present):
+            continue                      # 우리가 적은 기준선이 근거에 있으면 넘어간다
+        problems.append(
+            f"비교 기준선을 '{'/'.join(sorted(said))}'로 적었으나 근거에는 "
+            f"'{'/'.join(sorted(present))}'만 나온다. 기준선이 바뀌면 수치의 "
+            f"뜻이 달라진다.")
 
     # 2-1b) 기술에 붙은 연도가 서지 정보와 맞는지.
     #

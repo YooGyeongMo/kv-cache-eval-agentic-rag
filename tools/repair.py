@@ -36,14 +36,14 @@ from agents.nodes import (CITE, attach_reference, backed_by,  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙는다. 아스키로 제한한다.
-TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
+TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|퍼센트|배|×)")
 POOL_TAG = re.compile(r"^(MLA|ITME)\s+p\.\d+$")
 
 log: list[str] = []
 
 
 def norm(tok: str) -> str:
-    return re.sub(r"\s+", "", tok).lower().rstrip("%배×")
+    return re.sub(r"(%|퍼센트|배|×)$", "", re.sub(r"\s+", "", tok)).lower()
 
 
 def strip_pipes_in_tags(body: str) -> str:
@@ -94,10 +94,13 @@ def repair_tags(body: str, known: set[str]) -> str:
             return m.group(0)
         cands = {norm_cite(k) for k in known if k.startswith("웹:") and
                  (norm_cite(k).startswith(tag) or tag.startswith(norm_cite(k)))}
-        if len(cands) == 1:
-            full = cands.pop()
+        if cands:
+            # 여럿이면 가장 짧은 것을 고른다. 같은 출처의 제목이 말줄임표
+            # 유무로 갈리는 경우라 어느 쪽을 골라도 같은 문서다.
+            full = min(cands, key=len)
             if full != tag:
-                log.append(f"꼬리표 복원: '{tag}' → '{full}'")
+                log.append(f"꼬리표 복원: '{tag}' → '{full}'"
+                           + (f" (후보 {len(cands)}개 중 최단)" if len(cands) > 1 else ""))
             return f"[{full}]"
         return m.group(0)
     return CITE.sub(fix, body)
@@ -109,10 +112,23 @@ SPLIT = re.compile(r"((?<=[.。])\s+|\n|\|)")
 
 
 def repoint_and_drop(body: str, by_cite: dict[str, str]) -> str:
-    """수치가 실제로 있는 쪽으로 꼬리표를 옮기고, 없으면 근거 없음으로 내린다."""
+    """수치가 실제로 있는 쪽으로 꼬리표를 옮기고, 없으면 내린다.
+
+    표 칸과 문단 속 문장을 구별한다. 표에서는 빈칸 대신 근거 없음이라고
+    적는 편이 읽기 좋지만, 문단 한가운데에 그 말이 박히면 문장이 깨진다.
+    실제로 "근거 없음 저자는 I/O 경합 시..."처럼 나왔다.
+    """
     parts = SPLIT.split(body)
-    return "".join(p if i % 2 else repair_unit(p, by_cite)
-                   for i, p in enumerate(parts))
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2:
+            out.append(part)
+            continue
+        # 앞뒤 구분자가 세로줄이면 표 칸이다
+        in_table = (i > 0 and parts[i - 1] == "|") or \
+                   (i + 1 < len(parts) and parts[i + 1] == "|")
+        out.append(repair_unit(part, by_cite, in_table))
+    return "".join(out)
 
 
 def rewrite_selection(body: str) -> str:
@@ -148,7 +164,72 @@ def rewrite_selection(body: str) -> str:
     return body[:m.start()] + new + body[m.end():]
 
 
-BILLION = re.compile(r"(\d[\d,.]*)\s*억\s*달러")
+def fix_punctuation(body: str) -> str:
+    """본문에 쓰지 않기로 한 문장부호를 말로 푼다.
+
+    가운뎃점은 한국어에서 병렬 나열에 쓰인다. 메모리·전력 제약처럼.
+    읽는 흐름을 끊고 문서마다 표기가 달라지므로 조사로 잇는다.
+    표 안은 건드리지 않는다. 좁은 칸에서는 기호가 자연스럽다.
+    """
+    out, n = [], 0
+    for line in body.split("\n"):
+        if line.lstrip().startswith(("|", "#")):
+            out.append(line)
+            continue
+        # 낱말 사이의 가운뎃점만 바꾼다. 앞뒤가 한글이나 영문일 때다.
+        fixed, k = re.subn(r"(?<=[\w가-힣])·(?=[\w가-힣])", "과 ", line)
+        # 받침이 없는 앞말이면 와로 적는다
+        fixed = re.sub(r"([가-힣])과 (?=[\w가-힣])",
+                       lambda m: m.group(1) + ("과 " if _has_final(m.group(1)) else "와 "),
+                       fixed)
+        n += k
+        out.append(fixed)
+    if n:
+        log.append(f"가운뎃점을 조사로 품: {n}곳")
+    return "\n".join(out)
+
+
+# 상투적인 연결어를 말로 푼다. 뜻을 바꾸지 않고 바꿔 쓸 수 있는 것만 둔다.
+# 문장을 지우거나 합치지는 않는다. 그건 사람이 읽고 판단할 일이다.
+CLICHE = {
+    "이를 통해": "그 결과",
+    "뿐만 아니라": "그리고",
+    "결론적으로": "정리하면",
+    "요약하면": "정리하면",
+    "살펴보면": "보면",
+    "나아가": "여기에 더해",
+    "본 연구는": "이 보고서는",
+    "주목할 만한": "눈에 띄는",
+}
+
+
+def fix_cliche(body: str) -> str:
+    """상투적인 연결어를 바꿔 쓴다. 표와 제목은 건드리지 않는다."""
+    out, hits = [], []
+    for line in body.split("\n"):
+        if line.lstrip().startswith(("|", "#", ">")):
+            out.append(line)
+            continue
+        for bad, good in CLICHE.items():
+            if bad in line:
+                hits.append(f"{bad} → {good}")
+                line = line.replace(bad, good)
+        out.append(line)
+    if hits:
+        log.append("상투어 교체: " + ", ".join(sorted(set(hits))))
+    return "\n".join(out)
+
+
+def _has_final(ch: str) -> bool:
+    """한글 낱자에 받침이 있는지 본다. 와과를 가른다."""
+    code = ord(ch)
+    if not 0xAC00 <= code <= 0xD7A3:
+        return True
+    return (code - 0xAC00) % 28 != 0
+
+
+# 165억5천만 달러처럼 억과 천만을 이어 쓰기도 한다.
+BILLION = re.compile(r"(\d[\d,.]*)\s*억(?:\s*(\d)\s*천만)?\s*달러")
 
 
 def fix_years(body: str) -> str:
@@ -185,7 +266,9 @@ def undo_unit_conversion(body: str, by_cite: dict[str, str]) -> str:
     def fix(m: re.Match) -> str:
         try:
             eok = float(m.group(1).replace(",", ""))
-        except ValueError:
+            if m.lastindex and m.group(2):
+                eok += float(m.group(2)) * 0.1   # 5천만은 0.5억이다
+        except (ValueError, IndexError):
             return m.group(0)
         billion = eok / 10.0
         for form in (f"{billion:g}", f"{billion:.1f}"):
@@ -197,7 +280,68 @@ def undo_unit_conversion(body: str, by_cite: dict[str, str]) -> str:
     return BILLION.sub(fix, body)
 
 
-def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
+NUMERIC = re.compile(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|배|×)")
+
+
+def attach_missing(unit: str, by_cite: dict[str, str]) -> str:
+    """꼬리표가 아예 없는 수치 문단에 출처를 찾아 붙인다.
+
+    수치를 적고 근거를 안 단 문단이 나온다. 근거가 없으면 기준선이 맞는지
+    확인할 방법조차 없다. 그 수치를 실제로 담은 쪽을 찾아 붙인다.
+    찾지 못하면 손대지 않고 검증기가 잡게 둔다.
+    """
+    if CITE.search(unit) or not NUMERIC.search(unit):
+        return unit
+    toks = set(TOKEN.findall(unit))
+    owners: list[str] = []
+    for tok in toks:
+        found = sorted((c for c in by_cite
+                        if POOL_TAG.match(c) and backed_by(tok, by_cite[c])),
+                       key=lambda c: int(c.split("p.")[1]))
+        if found and found[0] not in owners:
+            owners.append(found[0])
+    if not owners:
+        return unit
+    log.append(f"빠진 출처 부착: {', '.join(owners[:3])} "
+               f"({', '.join(sorted(toks)[:3])}가 실제로 나온 쪽)")
+    return unit.rstrip() + "".join(f"[{o}]" for o in owners[:3])
+
+
+# 본문의 주장. 정상 표기만 본다.
+BILLION_CLAIM = re.compile(r"(\d+(?:\.\d+)?)\s*billion", re.I)
+# 근거 쪽. 스크래핑이 소수점 뒤에서 문장을 끊어 "USD16. 55 Billion"처럼
+# 깨진다. 소수점 주위의 공백을 허용해 원래 값을 되살린다.
+BILLION_SRC = re.compile(r"(\d+)\s*\.\s*(\d+)\s*billion", re.I)
+
+
+def fix_wrong_billions(body: str, by_cite: dict[str, str]) -> str:
+    """billion 수치를 근거의 값으로 바로잡는다.
+
+    모델이 16.55를 15.5로 옮겨 적었다. 자릿수가 비슷해 눈으로는 잘 안
+    보이지만 시장 전망치가 6퍼센트 어긋난다. 근거에 나온 billion 값 중
+    가장 가까운 것으로 되돌린다. 차이가 크면 손대지 않는다.
+    """
+    src = " ".join(by_cite.values())
+    known = {float(f"{a}.{b}") for a, b in BILLION_SRC.findall(src)}
+    if not known:
+        return body
+
+    def fix(m: re.Match) -> str:
+        val = float(m.group(1))
+        if val in known:
+            return m.group(0)
+        near = min(known, key=lambda k: abs(k - val))
+        # 잘못 읽은 수준일 때만 고친다. 멀면 다른 지표의 값일 수 있어 둔다.
+        if abs(near - val) / max(near, 1e-9) > 0.1:
+            return m.group(0)
+        log.append(f"billion 수치 교정: {m.group(1)} → {near:g} (근거 값)")
+        return m.group(0).replace(m.group(1), f"{near:g}")
+
+    return BILLION_CLAIM.sub(fix, body)
+
+
+def repair_unit(unit: str, by_cite: dict[str, str], in_table: bool = True) -> str:
+    unit = attach_missing(unit, by_cite)
     tags = [norm_cite(t) for t in CITE.findall(unit)]
     pool_tags = [t for t in tags if POOL_TAG.match(t)]
     if not pool_tags:
@@ -239,7 +383,9 @@ def repair_unit(unit: str, by_cite: dict[str, str]) -> str:
             return re.sub(r"\s{2,}", " ", unit)
         log.append(f"근거 없음으로 내림: {', '.join(sorted(still_bad))} "
                    f"(꼬리표 {', '.join(pool_tags)}) — 문서 풀 어디에도 없음")
-        return " 근거 없음 " if unit.startswith(" ") or unit.endswith(" ") else "근거 없음"
+        if in_table:
+            return " 근거 없음 " if unit.startswith(" ") or unit.endswith(" ") else "근거 없음"
+        return ""        # 문단 속 문장이면 통째로 뺀다. 남은 문장으로 읽힌다
 
     if added:
         unit = unit.rstrip()
@@ -269,12 +415,15 @@ def main() -> None:
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
 
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
+    body = fix_punctuation(body)
+    body = fix_cliche(body)
     body = rewrite_selection(body)
     body = split_merged_tags(body)
     body = strip_pipes_in_tags(body)
     body = repair_tags(body, known)
     body = fix_years(body)
     body = undo_unit_conversion(body, by_cite)
+    body = fix_wrong_billions(body, by_cite)
     body = repoint_and_drop(body, by_cite)
 
     note = ("\n\n> 이 보고서는 생성 후 검증 단계를 거쳤다. 인용 꼬리표가 가리키는 근거에 "
