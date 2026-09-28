@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from graph import build
 from rag import embedder as emb
 from rag.ingest import build_pool, pool_page_count
 from rag.retriever import HybridRetriever
+from rag.webcache import WebCache
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "outputs"
@@ -49,21 +51,59 @@ def cmd_index() -> None:
 def make_web_search():
     from langchain_tavily import TavilySearch
 
-    tool = TavilySearch(max_results=5, search_depth="advanced")
+    # 타임아웃을 두지 않으면 응답이 없을 때 끝없이 매달린다. 역방향 실행이
+    # 실제로 27분 동안 멈춰 있었다. 한 번 못 받으면 그 질의는 비우고 넘어간다.
+    tool = TavilySearch(max_results=5, search_depth="advanced", timeout=30)
+    stat = {"ok": 0, "empty": 0, "fail": 0}
+    cache = WebCache()
 
     def search(query: str) -> list[dict]:
+        cached = cache.get(query)
+        if cached is not None:
+            stat["ok"] += 1
+            return cached
         try:
             res = tool.invoke({"query": query})
         except Exception as e:
-            print(f"  [웹 검색 실패] {type(e).__name__}: {e}")
+            stat["fail"] += 1
+            print(f"  [웹 검색 실패] {type(e).__name__}: {str(e)[:90]}")
+            _guard(stat)
             return []
         items = res.get("results", []) if isinstance(res, dict) else []
-        return [{"title": i.get("title", ""), "url": i.get("url", ""),
-                 "content": i.get("content", ""),
-                 # 검색 도구가 줄 때만 있다. 없으면 참고문헌에 작성일 미상으로 적는다.
-                 "published": i.get("published_date", "") or ""} for i in items]
+        if items:
+            stat["ok"] += 1
+        else:
+            stat["empty"] += 1
+            print(f"  [웹 검색 결과 없음] {query[:70]}")
+            _guard(stat)
+        out = [{"title": i.get("title", ""), "url": i.get("url", ""),
+                "content": i.get("content", ""),
+                # 검색 도구가 줄 때만 있다. 없으면 참고문헌에 작성일 미상으로 적는다.
+                "published": i.get("published_date", "") or ""} for i in items]
+        cache.put(query, out)
+        return out
 
+    search.cache = cache
     return search
+
+
+def _guard(stat: dict) -> None:
+    """웹 검색이 계속 비면 실행을 멈춘다.
+
+    한도 소진이나 네트워크 장애로 검색이 전부 실패해도 파이프라인은 멀쩡히
+    끝났다. 시장성 관점이 통째로 "정보 없음"이 된 보고서가 나왔는데도
+    검증을 통과했다. 실제로 Tavily 한도가 차서 그렇게 됐다. 빈손으로
+    끝까지 가느니 여기서 멈추고 알리는 쪽이 낫다.
+    """
+    bad = stat["empty"] + stat["fail"]
+    if bad >= 5 and stat["ok"] == 0:
+        sys.exit(
+            f"\n[중단] 웹 검색이 {bad}회 연속 결과를 내지 못했다. "
+            f"실패 {stat['fail']}회, 빈 응답 {stat['empty']}회.\n"
+            f"시장성 관점은 웹 근거 없이는 채울 수 없다. 이대로 두면 그 장이 "
+            f"통째로 '정보 없음'인 보고서가 나온다.\n"
+            f"TAVILY_API_KEY의 사용 한도와 네트워크를 확인한 뒤 다시 돌린다.\n"
+            f"확인: https://app.tavily.com")
 
 
 def setup_note() -> str:
@@ -116,7 +156,8 @@ def cmd_run(seed: int) -> None:
     chunks = build_pool(spec)
     r = HybridRetriever.load(INDEX_NAME, emb.load(config.EMBEDDING))
     r.chunks = chunks
-    app = build(r, make_web_search(), setup_note(), limits_note)
+    web = make_web_search()
+    app = build(r, web, setup_note(), limits_note)
 
     init = {
         "techs": config.TECHS,
@@ -138,6 +179,7 @@ def cmd_run(seed: int) -> None:
     print(f"\n보고서 outputs/report_{tag}.md")
     print(f"LLM 호출 {llm.USAGE['calls']}회, 입력 {llm.USAGE['in']:,} 출력 {llm.USAGE['out']:,} 토큰")
     print(f"소요 {time.time() - t0:.0f}초")
+    print(f"{web.cache.summary()}")
     print(f"감사: {'통과' if state['audit']['passed'] else '지적 ' + str(len(state['audit']['flags'])) + '건'}")
     v = state.get("verify", {})
     print(f"검증: {'통과' if v.get('passed') else '지적 ' + str(len(v.get('problems', [])))+'건'}")
@@ -179,8 +221,14 @@ def cmd_final() -> None:
         ("평가 실행 (정방향)", [py, "app.py", "run", "--seed", "0"]),
         ("평가 실행 (역방향, 순서 효과 확인)", [py, "app.py", "run", "--seed", "1"]),
         ("순서 효과 비교", [py, "app.py", "compare"]),
+        # 새 원고가 검증을 통과하면 아무것도 바꾸지 않는다. 걸린 것이 있을 때만
+        # 규칙이 분명한 범위에서 기계적으로 고친다.
+        ("검증 지적 정정", [py, "tools/repair.py", "outputs/report_seed0.md"]),
         ("PDF 변환", [py, "tools/md2pdf.py", "outputs/report_seed0.md",
-                      f"KV cache 최적화 기술 다관점 평가 · {sub['campus']} {sub['class']} {sub['author']}"]),
+                      f"KV cache 최적화 기술 다관점 평가: "
+                      f"소프트웨어 압축과 하드웨어 메모리 확장의 대조"
+                      f" · {sub['campus']} · {sub['class']} · {sub['author']}"
+                      f" · {date.today().isoformat()}"]),
     ]
     for label, cmd in steps:
         print(f"\n{'=' * 70}\n{label}\n{'=' * 70}")

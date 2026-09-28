@@ -129,10 +129,13 @@ def site_name(url: str) -> str:
     return base.replace("-", " ").title()
 
 
+# 한국어 본문은 퍼센트를 한글로도 적는다. 단위를 못 알아보면 그 수치를
+# 아예 못 세고, 근거 없이 적힌 문단을 그냥 지나친다.
 UNIT_WORDS = {
     "배": r"(?:times|fold|×|x\b|speedup)",
     "×": r"(?:times|fold|×|x\b|speedup)",
     "%": r"(?:%|percent)",
+    "퍼센트": r"(?:%|percent)",
 }
 
 
@@ -144,10 +147,13 @@ def backed_by(token: str, backing: str) -> bool:
     없었다. 그래도 통과했다. 그래서 단위가 붙은 수치는 근거에서도 그 단위와
     가까이 있어야 받친 것으로 본다.
     """
-    flat = backing.replace(" ", "")
+    # 근거 쪽도 소문자로 맞춘다. 대소문자를 안 맞춰서 Gen5가 논문 다섯 쪽에
+    # 있는데도 없다고 판정했고, 멀쩡한 서술이 근거 없음으로 내려갔다.
+    flat = backing.replace(" ", "").lower()
     probe = re.sub(r"\s+", "", token).lower()
-    unit = next((u for u in UNIT_WORDS if probe.endswith(u)), None)
-    num = probe.rstrip("%배×") if unit else probe
+    unit = next((u for u in sorted(UNIT_WORDS, key=len, reverse=True)
+                 if probe.endswith(u)), None)
+    num = probe[: -len(unit)] if unit else probe
 
     if len(num) < 3 and not unit:
         return True                      # 두 자리 이하 맨숫자는 판단하지 않는다
@@ -193,12 +199,15 @@ def short_title(raw: str | None) -> str:
     # 세로줄을 지운다. 웹 제목에 흔히 들어가는데(예: "제목 | 사이트명")
     # 표 안의 꼬리표에 그대로 들어가면 마크다운이 칸 구분자로 읽어 표가 깨진다.
     t = " ".join((raw or "제목 없음").replace("|", "/").split())
+    # 검색 도구가 같은 문서의 제목을 말줄임표를 붙여 주기도 하고 안 붙여
+    # 주기도 한다. 그대로 두면 한 출처가 두 꼬리표로 갈린다.
+    t = re.sub(r"[\s.\u2026]+$", "", t)
     if len(t) <= 55:
         return t
     cut = t[:55]
     if " " in cut:
         cut = cut[:cut.rindex(" ")]
-    return cut.rstrip(" ,:;-")
+    return cut.rstrip(" ,:;-.\u2026")
 
 
 def _web_context(items: list[dict]) -> str:
@@ -350,6 +359,18 @@ def audit(s: EvalState) -> dict:
     if counts and min(counts) and max(counts) / min(counts) > 2.0:
         report["flags"].append(
             f"두 기술의 근거 수가 2배 넘게 차이 난다: {counts}. 비교가 기울 수 있다.")
+
+    # 시장성 관점은 웹 근거가 없으면 성립하지 않는다.
+    #
+    # 채택 현황, 생태계, 시장 규모는 논문에 있을 수 없는 정보다. 웹 검색이
+    # 한도 소진으로 전부 빈손이었는데도 감사를 통과해, 4.1장이 통째로
+    # "정보 없음"인 보고서가 나온 적이 있다. 근거의 종류까지 세어야 한다.
+    web_total = sum(1 for e in s.get("evidence", [])
+                    if e["source_type"] == "web" and e["perspective"] == "market")
+    if web_total == 0:
+        report["flags"].append(
+            "시장성 관점에 웹 근거가 한 건도 없다. 채택 현황과 시장 수치는 "
+            "논문에 있을 수 없으므로 이 관점이 빈다. 검색 도구의 상태를 확인한다.")
 
     report["passed"] = not report["flags"]
     return {"audit": report}
@@ -515,11 +536,21 @@ def verify(s: EvalState) -> dict:
     problems: list[str] = []
 
     # 1) 우열 판정 표현
+    #
+    # 부정형은 잡지 않는다. "어느 쪽이 더 낫다고 단정할 수 없다"는 우열을
+    # 주장하는 문장이 아니라 부정하는 문장이고, 과제가 요구한 태도 그대로다.
+    # 금지하는 것은 한쪽을 높이는 서술이지 그것을 부인하는 서술이 아니다.
+    NEGATION = re.compile(
+        r"(없|않|못|아니|어렵|곤란|삼가|지 말|기 힘)")
     for w in config.FORBIDDEN:
-        if w in body:
-            m = re.search(rf".{{0,40}}{re.escape(w)}.{{0,40}}", body)
+        for m in re.finditer(re.escape(w), body):
+            tail = body[m.end(): m.end() + 30]
+            if NEGATION.search(tail):
+                continue
+            ctx = body[max(0, m.start() - 40): m.end() + 40]
             problems.append(f"우열을 판정하는 표현 '{w}'가 있다. 관찰 서술로 바꾼다. "
-                            f"맥락: ...{m.group(0) if m else ''}...")
+                            f"맥락: ...{ctx}...")
+            break
 
     # 2) 인용 꼬리표 대조. 근거 원장에 없는 꼬리표는 지어낸 출처다.
     #    양쪽 다 공백을 털고 비교한다. 예전 절단 방식이 꼬리표 끝에 공백을
@@ -550,7 +581,7 @@ def verify(s: EvalState) -> dict:
         c = norm_cite(e["cite"])
         by_cite[c] = by_cite.get(c, "") + " " + e.get("full", "")
     # \w는 한글까지 포함해서 Gen5를 처럼 조사가 붙어 버린다. 아스키로 제한한다.
-    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|배|×)")
+    TOKEN = re.compile(r"[A-Za-z][A-Za-z.]*\d[A-Za-z0-9.\-]*|\d+(?:[.,]\d+)?\s*(?:%|퍼센트|배|×)")
     mismatched = []
     for unit in re.split(r"(?<=[.。])\s+|\n|\|", body):
         tags = [norm_cite(t) for t in CITE.findall(unit)]
@@ -569,6 +600,64 @@ def verify(s: EvalState) -> dict:
             "꼬리표가 가리키는 쪽에 없는 표기를 그 꼬리표로 인용했다: "
             + ", ".join(sorted(set(mismatched))[:8])
             + ". 그 내용이 실제로 나온 근거의 꼬리표를 달거나 문장을 뺀다.")
+
+    # 1-a) 금지어 검사가 제 꼬리를 물지 않는지 확인한다.
+    #
+    # 편향 방지 조치 설명이 한계 장에 실리는데, 그 설명문에 금지어를 그대로
+    # 적어 두면 고칠 수 없는 지적이 생기고 재시도만 낭비된다.
+    for key, text in config.BIAS_GUARDS.items():
+        hit = [w for w in config.FORBIDDEN if w in text]
+        if hit:
+            problems.append(f"BIAS_GUARDS['{key}'] 설명문에 금지어 {hit}가 들어 있다. "
+                            f"주입 재료가 검사에 걸리면 모델이 고칠 수 없다.")
+
+    # 1-b) 조판과 문체. 본문에 쓰지 않기로 한 문장부호와 상투어를 잡는다.
+    for ch, name in (("\u2014", "긴 대시"), ("\u2013", "en 대시"),
+                     ("\u00b7", "가운뎃점"), ("\u2192", "화살표"),
+                     ("\u2190", "화살표"), ("\u21d2", "화살표"),
+                     ("\u2026", "말줄임표")):
+        if ch in re.sub(r"\|[^\n]*\|", "", body):      # 표 안은 예외
+            problems.append(f"본문에 {name}({ch})를 썼다. 문장으로 풀어 쓴다.")
+    for phrase in ("뿐만 아니라", "결론적으로", "요약하면", "살펴보면",
+                   "주목할 만한", "이를 통해", "나아가", "본 연구는"):
+        if phrase in body:
+            problems.append(f"상투적인 연결어 '{phrase}'를 썼다. 문장을 직접 잇는다.")
+
+    # 2-1a) 수치에 붙인 비교 기준선이 근거와 같은지.
+    #
+    # 같은 논문이 기준선을 바꿔 가며 여러 수치를 적는다. ITME는 35.7퍼센트를
+    # CPU 오프로딩 대비로, 1.80배를 NVMe-oF 대비로, 1.81배를 재계산 대비로
+    # 보고한다. 9차 실행이 35.7퍼센트를 재계산 대비로 적었다. 숫자는 맞지만
+    # 뜻이 달라진다. 숫자 대조로는 잡히지 않아 따로 본다.
+    BASELINES = {
+        "cpu-offload": ("cpu-offload", "cpu offload", "cpu 오프로딩", "cpu-오프로딩"),
+        "recompute": ("recompute", "recomputation", "재계산"),
+        "nvme-of": ("nvme-of", "nvme of", "nvme-oF"),
+    }
+    # 문단 단위로 본다. 꼬리표는 문장마다 붙기도 하고 문단 끝에 몰아 붙기도
+    # 해서, 문장으로 쪼개면 수치와 꼬리표가 서로 다른 조각에 떨어진다.
+    for unit in re.split(r"\n|\|", body):
+        nums = re.findall(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|배|×)", unit)
+        tags = [norm_cite(t) for t in CITE.findall(unit)]
+        pool_tags = [t for t in tags if re.match(r"^(MLA|ITME)\s+p\.\d+$", t)]
+        if not (nums and pool_tags):
+            continue
+        said = {k for k, words in BASELINES.items()
+                if any(w in unit.lower() for w in words)}
+        if not said:
+            continue
+        backing = " ".join(by_cite.get(t, "") for t in pool_tags).lower()
+        # 근거 전체에 어떤 기준선이 나오는지 먼저 본다. 한 쪽에 여러 기준선이
+        # 함께 적히는 경우가 많아, 수치 뒤쪽만 보면 엉뚱한 것을 짚는다.
+        # ITME p.10은 CPU 오프로딩과 재계산을 한 문단에서 같이 다룬다.
+        present = {k for k, words in BASELINES.items()
+                   if any(w in backing for w in words)}
+        if not present or (said & present):
+            continue                      # 우리가 적은 기준선이 근거에 있으면 넘어간다
+        problems.append(
+            f"비교 기준선을 '{'/'.join(sorted(said))}'로 적었으나 근거에는 "
+            f"'{'/'.join(sorted(present))}'만 나온다. 기준선이 바뀌면 수치의 "
+            f"뜻이 달라진다.")
 
     # 2-1b) 기술에 붙은 연도가 서지 정보와 맞는지.
     #
@@ -610,6 +699,20 @@ def verify(s: EvalState) -> dict:
     sec = re.search(r"##\s*4\..*?(?=\n##\s|\Z)", body, re.S)
     if sec and len(CITE.findall(sec.group(0))) < 6:
         problems.append("4장 관점별 평가에 인용 꼬리표가 너무 적다. 기준마다 근거를 단다.")
+
+    # 4-b) 수치를 적은 문단에는 어디든 근거가 있어야 한다.
+    #
+    # 4장만 보다가 3장에서 "recomputation baseline 대비 35.7퍼센트"를 꼬리표
+    # 없이 적은 것을 놓쳤다. 게다가 그 기준선은 근거와 달랐다. 근거가 없으면
+    # 기준선이 맞는지 확인할 방법조차 없다.
+    for para in re.split(r"\n\s*\n", body):
+        if para.lstrip().startswith(("#", "|", ">")):
+            continue                              # 제목, 표, 인용구는 따로 본다
+        plain = CITE.sub("", para)
+        if re.search(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|배|×)", plain) and not CITE.search(para):
+            snippet = " ".join(plain.split())[:60]
+            problems.append(f"수치를 적은 문단에 근거가 없다. 꼬리표를 단다. "
+                            f"해당 문단: {snippet}")
 
     # 5) 웹 근거에 쪽수가 붙었는지. 앞선 실험에서 실제로 생긴 오류다.
     for m in re.finditer(r"\[웹:[^\]]*?p\.\d+[^\]]*\]", body):

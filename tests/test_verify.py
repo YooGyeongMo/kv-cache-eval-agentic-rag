@@ -246,3 +246,135 @@ def test_기술_선정_사유가_사람이_쓴_것인가():
         assert t["why"][:20] in note, f"{t['id']}의 선정 사유가 빠졌다"
     for name in config.NOT_SELECTED:
         assert name in note, f"뺀 후보 {name}이 빠졌다"
+
+
+# ---------------------------------------------------------------- 레드팀 10차
+def test_시장성에_웹_근거가_없으면_감사가_잡는다():
+    """Tavily 한도가 차서 검색이 전부 빈손이었는데 감사를 통과한 적이 있다.
+
+    그 결과 4.1 시장성 관점이 통째로 "정보 없음"인 보고서가 나왔다.
+    근거의 개수만 세지 말고 종류까지 봐야 한다.
+    """
+    import config
+    from agents.nodes import audit
+    pool_only = [
+        {"tech": t["id"], "perspective": "market", "stance": st,
+         "source_type": "pool", "tier": "문서", "cite": f"{t['id']} p.1", "full": "x"}
+        for t in config.TECHS for st in ("pro", "con")
+    ]
+    state = {
+        "techs": config.TECHS, "evidence": pool_only,
+        "market": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                   for t in config.TECHS},
+        "domain_fit": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                       for t in config.TECHS},
+    }
+    r = audit(state)["audit"]
+    assert not r["passed"]
+    assert any("웹 근거가 한 건도 없다" in f for f in r["flags"])
+
+
+def test_웹_근거가_있으면_감사를_통과한다():
+    import config
+    from agents.nodes import audit
+    ev = []
+    for t in config.TECHS:
+        for st in ("pro", "con"):
+            ev.append({"tech": t["id"], "perspective": "market", "stance": st,
+                       "source_type": "pool", "tier": "문서",
+                       "cite": f"{t['id']} p.1", "full": "x"})
+            ev.append({"tech": t["id"], "perspective": "market", "stance": st,
+                       "source_type": "web", "tier": "일차",
+                       "cite": "웹: 제목", "full": "y", "url": "https://arxiv.org/x"})
+    state = {
+        "techs": config.TECHS, "evidence": ev,
+        "market": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                   for t in config.TECHS},
+        "domain_fit": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                       for t in config.TECHS},
+    }
+    assert audit(state)["audit"]["passed"]
+
+
+# ---------------------------------------------------------------- 레드팀 12차
+def test_대소문자가_달라도_근거로_본다():
+    """근거 쪽을 소문자로 안 맞춰서 Gen5가 논문에 있는데도 없다고 판정했다.
+
+    그 결과 멀쩡한 서술이 근거 없음으로 계속 내려갔다.
+    """
+    from agents.nodes import backed_by
+    src = "Hynix CMM and PCIe Gen5 NVMe SSDs were used for evaluation"
+    assert backed_by("Gen5", src)
+    assert backed_by("gen5", src)
+    assert not backed_by("FP4", src), "없는 표기는 여전히 걸러야 한다"
+
+
+def test_억천만_표기도_원표기로_되돌린다():
+    """165억5천만 달러처럼 억과 천만을 이어 쓴 형태를 놓쳤다."""
+    from tools.repair import undo_unit_conversion
+    by = {"x": "reaches 1.74 billion in 2026 and 16.55 billion by 2035"}
+    out = undo_unit_conversion("2026년 17억4천만 달러, 2035년 165억5천만 달러", by)
+    assert "1.74 billion" in out and "16.55 billion" in out
+    assert "억" not in out
+
+
+def test_근거에_없는_환산값은_건드리지_않는다():
+    from tools.repair import undo_unit_conversion
+    assert "99억 달러" in undo_unit_conversion("99억 달러", {"x": "no such figure"})
+
+
+def test_스크래핑이_깨뜨린_수치를_복원한다():
+    """웹 스크래핑이 소수점 뒤에서 문장을 끊어 'USD16. 55 Billion'이 된다.
+
+    이걸 55 billion으로 읽고 본문의 15.5를 14.99로 "고친" 적이 있다.
+    추측으로 숫자를 고치면 원문보다 나빠진다.
+    """
+    from tools.repair import fix_wrong_billions
+    by = {"x": "2026 MARKET SIZE USD1. 74 Billion 2035 MARKET SIZE USD16. 55 Billion"}
+    assert "16.55 billion" in fix_wrong_billions("2035년 15.5 billion", by)
+    assert "1.74 billion" in fix_wrong_billions("2026년 1.74 billion", by)
+    # 멀리 떨어진 값은 다른 지표일 수 있으므로 손대지 않는다
+    assert "900 billion" in fix_wrong_billions("무관한 900 billion", by)
+
+
+def test_한_쪽에_기준선이_여럿이면_잡지_않는다():
+    """ITME p.10은 CPU 오프로딩과 재계산을 한 문단에서 같이 다룬다.
+
+    수치 뒤쪽만 보고 판정해서 멀쩡한 서술을 기준선 오류로 몰았다.
+    """
+    ev = [{"cite": "ITME p.10", "source_type": "pool", "tier": "문서",
+           "full": "the CPU-offload baseline exhausts its memory, its caching system "
+                   "collapses forcing the hit rate to 0%, making it as slow as the "
+                   "recompute-only baseline"}]
+    body = ("| 기준 | 값 |\n"
+            "| 붕괴 | CPU-offload 베이스라인의 hit rate가 0퍼센트로 떨어진다[ITME p.10] |\n"
+            "| 기타1 | 값이다[ITME p.10] |\n| 기타2 | 값이다[ITME p.10] |\n"
+            "| 기타3 | 값이다[ITME p.10] |\n| 기타4 | 값이다[ITME p.10] |\n")
+    assert not has(run(body, ev), "비교 기준선")
+
+
+# ---------------------------------------------------------------- 레드팀 13차
+def test_우열을_부정하는_문장은_잡지_않는다():
+    """과제가 요구한 태도가 바로 우열을 판정하지 않는 것이다.
+
+    "어느 쪽이 더 낫다고 단정할 수 없다"를 금지어로 잡으면, 규칙이
+    지키라는 태도를 지켰다는 이유로 걸리는 셈이 된다.
+    """
+    ok = ("| 기준 | 값 |\n"
+          "| 대칭 | 어느 쪽이 더 낫다고 단정할 수 없다[MLA p.1] |\n"
+          "| 압축 | 93.3% 줄였다[MLA p.1] |\n| 처리량 | 5.76배다[MLA p.1] |\n"
+          "| 비용 | 42.5% 절감이다[MLA p.1] |\n| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    assert not has(run(ok), "우열을 판정하는 표현")
+
+    for phrase in ("우수하다고 보기 어렵다", "추천하지 않는다", "권장할 수 없다"):
+        body = (f"| 기준 | 값 |\n| a | {phrase}[MLA p.1] |\n"
+                "| 압축 | 93.3% 줄였다[MLA p.1] |\n| 처리량 | 5.76배다[MLA p.1] |\n"
+                "| 비용 | 42.5% 절감이다[MLA p.1] |\n| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+        assert not has(run(body), "우열을 판정하는 표현"), f"부정형인데 잡혔다: {phrase}"
+
+
+def test_우열을_단언하면_여전히_잡는다():
+    body = ("| 기준 | 값 |\n| a | MLA가 ITME보다 더 낫다[MLA p.1] |\n"
+            "| 압축 | 93.3% 줄였다[MLA p.1] |\n| 처리량 | 5.76배다[MLA p.1] |\n"
+            "| 비용 | 42.5% 절감이다[MLA p.1] |\n| 기타 | 35.7% 향상이다[ITME p.10] |\n")
+    assert has(run(body), "우열을 판정하는 표현")
