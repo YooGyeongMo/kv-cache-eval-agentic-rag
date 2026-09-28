@@ -351,6 +351,18 @@ def audit(s: EvalState) -> dict:
         report["flags"].append(
             f"두 기술의 근거 수가 2배 넘게 차이 난다: {counts}. 비교가 기울 수 있다.")
 
+    # 시장성 관점은 웹 근거가 없으면 성립하지 않는다.
+    #
+    # 채택 현황, 생태계, 시장 규모는 논문에 있을 수 없는 정보다. 웹 검색이
+    # 한도 소진으로 전부 빈손이었는데도 감사를 통과해, 4.1장이 통째로
+    # "정보 없음"인 보고서가 나온 적이 있다. 근거의 종류까지 세어야 한다.
+    web_total = sum(1 for e in s.get("evidence", [])
+                    if e["source_type"] == "web" and e["perspective"] == "market")
+    if web_total == 0:
+        report["flags"].append(
+            "시장성 관점에 웹 근거가 한 건도 없다. 채택 현황과 시장 수치는 "
+            "논문에 있을 수 없으므로 이 관점이 빈다. 검색 도구의 상태를 확인한다.")
+
     report["passed"] = not report["flags"]
     return {"audit": report}
 
@@ -570,6 +582,66 @@ def verify(s: EvalState) -> dict:
             + ", ".join(sorted(set(mismatched))[:8])
             + ". 그 내용이 실제로 나온 근거의 꼬리표를 달거나 문장을 뺀다.")
 
+    # 1-a) 금지어 검사가 제 꼬리를 물지 않는지 확인한다.
+    #
+    # 편향 방지 조치 설명이 한계 장에 실리는데, 그 설명문에 금지어를 그대로
+    # 적어 두면 고칠 수 없는 지적이 생기고 재시도만 낭비된다.
+    for key, text in config.BIAS_GUARDS.items():
+        hit = [w for w in config.FORBIDDEN if w in text]
+        if hit:
+            problems.append(f"BIAS_GUARDS['{key}'] 설명문에 금지어 {hit}가 들어 있다. "
+                            f"주입 재료가 검사에 걸리면 모델이 고칠 수 없다.")
+
+    # 1-b) 조판과 문체. 본문에 쓰지 않기로 한 문장부호와 상투어를 잡는다.
+    for ch, name in (("\u2014", "긴 대시"), ("\u2013", "en 대시"),
+                     ("\u00b7", "가운뎃점"), ("\u2192", "화살표"),
+                     ("\u2190", "화살표"), ("\u21d2", "화살표"),
+                     ("\u2026", "말줄임표")):
+        if ch in re.sub(r"\|[^\n]*\|", "", body):      # 표 안은 예외
+            problems.append(f"본문에 {name}({ch})를 썼다. 문장으로 풀어 쓴다.")
+    for phrase in ("뿐만 아니라", "결론적으로", "요약하면", "살펴보면",
+                   "주목할 만한", "이를 통해", "나아가", "본 연구는"):
+        if phrase in body:
+            problems.append(f"상투적인 연결어 '{phrase}'를 썼다. 문장을 직접 잇는다.")
+
+    # 2-1a) 수치에 붙인 비교 기준선이 근거와 같은지.
+    #
+    # 같은 논문이 기준선을 바꿔 가며 여러 수치를 적는다. ITME는 35.7퍼센트를
+    # CPU 오프로딩 대비로, 1.80배를 NVMe-oF 대비로, 1.81배를 재계산 대비로
+    # 보고한다. 9차 실행이 35.7퍼센트를 재계산 대비로 적었다. 숫자는 맞지만
+    # 뜻이 달라진다. 숫자 대조로는 잡히지 않아 따로 본다.
+    BASELINES = {
+        "cpu-offload": ("cpu-offload", "cpu offload", "cpu 오프로딩", "cpu-오프로딩"),
+        "recompute": ("recompute", "recomputation", "재계산"),
+        "nvme-of": ("nvme-of", "nvme of", "nvme-oF"),
+    }
+    # 문단 단위로 본다. 꼬리표는 문장마다 붙기도 하고 문단 끝에 몰아 붙기도
+    # 해서, 문장으로 쪼개면 수치와 꼬리표가 서로 다른 조각에 떨어진다.
+    for unit in re.split(r"\n|\|", body):
+        nums = re.findall(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|배|×)", unit)
+        tags = [norm_cite(t) for t in CITE.findall(unit)]
+        pool_tags = [t for t in tags if re.match(r"^(MLA|ITME)\s+p\.\d+$", t)]
+        if not (nums and pool_tags):
+            continue
+        said = {k for k, words in BASELINES.items()
+                if any(w in unit.lower() for w in words)}
+        if not said:
+            continue
+        backing = " ".join(by_cite.get(t, "") for t in pool_tags).lower()
+        for num in nums:
+            val = re.match(r"\d+(?:\.\d+)?", num.strip()).group(0)
+            m = re.search(re.escape(val) + r".{0,220}", backing)
+            if not m:
+                continue
+            near = m.group(0)
+            actual = {k for k, words in BASELINES.items()
+                      if any(w in near for w in words)}
+            if actual and not (said & actual):
+                problems.append(
+                    f"{num}의 비교 기준선을 '{'/'.join(sorted(said))}'로 적었으나 "
+                    f"근거는 '{'/'.join(sorted(actual))}' 대비다. 기준선이 바뀌면 "
+                    f"수치의 뜻이 달라진다.")
+
     # 2-1b) 기술에 붙은 연도가 서지 정보와 맞는지.
     #
     # 수치 대조에서 연도를 제외해 두었더니 "MLA 2026년, ITME 2024년"처럼
@@ -610,6 +682,20 @@ def verify(s: EvalState) -> dict:
     sec = re.search(r"##\s*4\..*?(?=\n##\s|\Z)", body, re.S)
     if sec and len(CITE.findall(sec.group(0))) < 6:
         problems.append("4장 관점별 평가에 인용 꼬리표가 너무 적다. 기준마다 근거를 단다.")
+
+    # 4-b) 수치를 적은 문단에는 어디든 근거가 있어야 한다.
+    #
+    # 4장만 보다가 3장에서 "recomputation baseline 대비 35.7퍼센트"를 꼬리표
+    # 없이 적은 것을 놓쳤다. 게다가 그 기준선은 근거와 달랐다. 근거가 없으면
+    # 기준선이 맞는지 확인할 방법조차 없다.
+    for para in re.split(r"\n\s*\n", body):
+        if para.lstrip().startswith(("#", "|", ">")):
+            continue                              # 제목, 표, 인용구는 따로 본다
+        plain = CITE.sub("", para)
+        if re.search(r"\d+(?:\.\d+)?\s*(?:%|퍼센트|배|×)", plain) and not CITE.search(para):
+            snippet = " ".join(plain.split())[:60]
+            problems.append(f"수치를 적은 문단에 근거가 없다. 꼬리표를 단다. "
+                            f"해당 문단: {snippet}")
 
     # 5) 웹 근거에 쪽수가 붙었는지. 앞선 실험에서 실제로 생긴 오류다.
     for m in re.finditer(r"\[웹:[^\]]*?p\.\d+[^\]]*\]", body):

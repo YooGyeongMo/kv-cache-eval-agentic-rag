@@ -33,7 +33,10 @@ def build(retriever, web_search, setup_note: str, limits_fn):
     survey = nodes.make_survey(sub)
     market = nodes.make_perspective(sub, "market")
     domain = nodes.make_perspective(sub, "domain")
-    report = nodes.make_report(setup_note, limits_fn, extra_numbers=setup_note)
+    # 검색 설정 표와 도메인 정의에 적힌 수치는 보고서가 인용해도 된다.
+    # 내가 넣어 준 재료이므로 근거 원장에 없다고 잡히면 안 된다.
+    injected = setup_note + ' ' + config.PRIMARY_DOMAIN + ' ' + ' '.join(config.CONTRAST_DOMAINS)
+    report = nodes.make_report(setup_note, limits_fn, extra_numbers=injected)
 
     def prepare(s: EvalState) -> dict:
         techs = list(s["techs"])

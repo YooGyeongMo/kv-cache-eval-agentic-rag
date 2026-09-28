@@ -64,6 +64,26 @@ def strip_pipes_in_tags(body: str) -> str:
     return out
 
 
+MERGED = re.compile(r"\[(MLA|ITME)\s+((?:p\.\d+\s*,\s*)+p\.\d+)\]")
+
+
+def split_merged_tags(body: str) -> str:
+    """한 괄호에 묶어 쓴 꼬리표를 하나씩 갈라 놓는다.
+
+    [ITME p.11, p.2]처럼 쓰면 원장에 그런 꼬리표가 없어 지어낸 출처로
+    판정된다. 실제로는 두 쪽을 함께 인용한 것이므로 갈라서 각각 단다.
+    """
+    def fix(m: re.Match) -> str:
+        doc = m.group(1)
+        pages = [p.strip() for p in m.group(2).split(",")]
+        return "".join(f"[{doc} {p}]" for p in pages)
+
+    out, n = MERGED.subn(fix, body)
+    if n:
+        log.append(f"묶어 쓴 꼬리표를 분리: {n}곳")
+    return out
+
+
 def repair_tags(body: str, known: set[str]) -> str:
     """잘린 꼬리표를 원장의 온전한 표기로 되돌린다."""
     def fix(m: re.Match) -> str:
@@ -250,6 +270,7 @@ def main() -> None:
 
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0].rstrip()
     body = rewrite_selection(body)
+    body = split_merged_tags(body)
     body = strip_pipes_in_tags(body)
     body = repair_tags(body, known)
     body = fix_years(body)

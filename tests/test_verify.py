@@ -246,3 +246,51 @@ def test_기술_선정_사유가_사람이_쓴_것인가():
         assert t["why"][:20] in note, f"{t['id']}의 선정 사유가 빠졌다"
     for name in config.NOT_SELECTED:
         assert name in note, f"뺀 후보 {name}이 빠졌다"
+
+
+# ---------------------------------------------------------------- 레드팀 10차
+def test_시장성에_웹_근거가_없으면_감사가_잡는다():
+    """Tavily 한도가 차서 검색이 전부 빈손이었는데 감사를 통과한 적이 있다.
+
+    그 결과 4.1 시장성 관점이 통째로 "정보 없음"인 보고서가 나왔다.
+    근거의 개수만 세지 말고 종류까지 봐야 한다.
+    """
+    import config
+    from agents.nodes import audit
+    pool_only = [
+        {"tech": t["id"], "perspective": "market", "stance": st,
+         "source_type": "pool", "tier": "문서", "cite": f"{t['id']} p.1", "full": "x"}
+        for t in config.TECHS for st in ("pro", "con")
+    ]
+    state = {
+        "techs": config.TECHS, "evidence": pool_only,
+        "market": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                   for t in config.TECHS},
+        "domain_fit": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                       for t in config.TECHS},
+    }
+    r = audit(state)["audit"]
+    assert not r["passed"]
+    assert any("웹 근거가 한 건도 없다" in f for f in r["flags"])
+
+
+def test_웹_근거가_있으면_감사를_통과한다():
+    import config
+    from agents.nodes import audit
+    ev = []
+    for t in config.TECHS:
+        for st in ("pro", "con"):
+            ev.append({"tech": t["id"], "perspective": "market", "stance": st,
+                       "source_type": "pool", "tier": "문서",
+                       "cite": f"{t['id']} p.1", "full": "x"})
+            ev.append({"tech": t["id"], "perspective": "market", "stance": st,
+                       "source_type": "web", "tier": "일차",
+                       "cite": "웹: 제목", "full": "y", "url": "https://arxiv.org/x"})
+    state = {
+        "techs": config.TECHS, "evidence": ev,
+        "market": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                   for t in config.TECHS},
+        "domain_fit": {t["id"]: {"pro": ["a"], "con": ["b"], "unknown": []}
+                       for t in config.TECHS},
+    }
+    assert audit(state)["audit"]["passed"]
