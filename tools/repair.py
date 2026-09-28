@@ -383,9 +383,25 @@ def repair_unit(unit: str, by_cite: dict[str, str], in_table: bool = True) -> st
             return re.sub(r"\s{2,}", " ", unit)
         log.append(f"근거 없음으로 내림: {', '.join(sorted(still_bad))} "
                    f"(꼬리표 {', '.join(pool_tags)}) — 문서 풀 어디에도 없음")
-        if in_table:
-            return " 근거 없음 " if unit.startswith(" ") or unit.endswith(" ") else "근거 없음"
-        return ""        # 문단 속 문장이면 통째로 뺀다. 남은 문장으로 읽힌다
+        if not in_table:
+            return ""    # 문단 속 문장이면 통째로 뺀다. 남은 문장으로 읽힌다
+        # 표 칸이라도 다른 서술이 함께 있으면 그 부분만 남긴다.
+        # "근거 없음 측정은 LongBench에서 이루어졌다"처럼 문장 앞에 박히면
+        # 읽는 사람이 무엇이 근거 없다는 것인지 알 수 없다.
+        rest = CITE.sub("", unit)
+        if len(rest.strip()) > 40:
+            kept = _drop_sentences_with(unit, still_bad)
+            if kept.strip():
+                log.append("  같은 칸의 나머지 서술은 남김")
+                return kept
+        return " 근거 없음 " if unit.startswith(" ") or unit.endswith(" ") else "근거 없음"
+
+
+def _drop_sentences_with(unit: str, bad: list[str]) -> str:
+    """근거가 없는 표기가 든 문장만 빼고 나머지를 남긴다."""
+    parts = re.split(r"(?<=[.。])\s+", unit)
+    kept = [s for s in parts if not any(b in s for b in bad)]
+    return " ".join(kept).strip()
 
     if added:
         unit = unit.rstrip()

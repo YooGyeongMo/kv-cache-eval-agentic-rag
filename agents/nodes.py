@@ -536,11 +536,21 @@ def verify(s: EvalState) -> dict:
     problems: list[str] = []
 
     # 1) 우열 판정 표현
+    #
+    # 부정형은 잡지 않는다. "어느 쪽이 더 낫다고 단정할 수 없다"는 우열을
+    # 주장하는 문장이 아니라 부정하는 문장이고, 과제가 요구한 태도 그대로다.
+    # 금지하는 것은 한쪽을 높이는 서술이지 그것을 부인하는 서술이 아니다.
+    NEGATION = re.compile(
+        r"(없|않|못|아니|어렵|곤란|삼가|지 말|기 힘)")
     for w in config.FORBIDDEN:
-        if w in body:
-            m = re.search(rf".{{0,40}}{re.escape(w)}.{{0,40}}", body)
+        for m in re.finditer(re.escape(w), body):
+            tail = body[m.end(): m.end() + 30]
+            if NEGATION.search(tail):
+                continue
+            ctx = body[max(0, m.start() - 40): m.end() + 40]
             problems.append(f"우열을 판정하는 표현 '{w}'가 있다. 관찰 서술로 바꾼다. "
-                            f"맥락: ...{m.group(0) if m else ''}...")
+                            f"맥락: ...{ctx}...")
+            break
 
     # 2) 인용 꼬리표 대조. 근거 원장에 없는 꼬리표는 지어낸 출처다.
     #    양쪽 다 공백을 털고 비교한다. 예전 절단 방식이 꼬리표 끝에 공백을

@@ -62,8 +62,11 @@ def check_report(seed: int) -> dict:
           else " / ".join(audit.get("flags", []))[:300])
 
     body = re.split(r"\n#{1,3}\s*REFERENCE\s*\n", md)[0]
-    hits = [w for w in config.FORBIDDEN if w in body]
-    check(f"seed{seed} 우열 표현", not hits, "없음" if not hits else ", ".join(hits))
+    # 검증기와 같은 기준을 쓴다. 부정형은 우열 주장이 아니다.
+    v_problems = v["problems"]
+    hits = [p for p in v_problems if "우열을 판정하는 표현" in p]
+    check(f"seed{seed} 우열 표현", not hits,
+          "없음" if not hits else f"{len(hits)}건")
 
     for head in ["# SUMMARY", "## 1.", "## 2.", "## 3.", "## 4.", "## 5.", "## 6.", "REFERENCE"]:
         if head not in md:

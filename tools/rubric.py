@@ -89,8 +89,16 @@ def main() -> None:
     check(g, "우열 판정 표현 없음",
           not [w for w in config.FORBIDDEN if w in body],
           "금지어 검사 통과")
-    check(g, "관점 간 상충 지점 명시",
-          "상충" in body or "엇갈" in body or "갈린" in body, "5장 시사점")
+    # 같은 뜻을 여러 말로 쓴다. 시장성 관점과 도메인 관점을 한 문단에서
+    # 맞세우는지까지 본다. 낱말만 세면 표현을 바꿨을 때 놓친다.
+    ch5 = re.search(r"##\s*5\..*?(?=\n##\s*6\.|\Z)", body, re.S)
+    ch5_text = ch5.group(0) if ch5 else ""
+    both = ("시장성" in ch5_text and "도메인" in ch5_text)
+    words = any(w in ch5_text for w in
+                ("상충", "엇갈", "갈린", "갈리", "다르게 읽", "반대", "대비"))
+    check(g, "관점 간 상충 지점 명시", both and words,
+          "5장에서 시장성과 도메인 관점을 맞세움" if both and words
+          else f"5장에 시장성={('시장성' in ch5_text)}, 대비 표현={words}")
     check(g, "논문 참고문헌 형식",
           bool(re.search(r"\(\d{4}\)\..*\*arXiv\*, \d{4}\.\d{4,5}", md)),
           "저자(연도). 제목. arXiv, 번호")
